@@ -1,7 +1,7 @@
 
 'use strict';
 
-const CACHE_NAME = 'pera-tracker-v2.1';
+const CACHE_NAME = 'pera-tracker-v3.0';
 const DB_NAME = 'peraTrackerDB';
 const DB_VERSION = 1;
 const DEBT_STORE = 'debts';
@@ -61,8 +61,12 @@ self.addEventListener('fetch', event => {
 });
 
 self.addEventListener('message', event => {
-  if (event.data && event.data.type === 'CHECK_DUES') {
+  if (!event.data) return;
+  if (event.data.type === 'CHECK_DUES') {
     event.waitUntil(checkDueReminders());
+  }
+  if (event.data.type === 'SKIP_WAITING') {
+    self.skipWaiting();
   }
 });
 

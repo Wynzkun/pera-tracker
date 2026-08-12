@@ -14,6 +14,11 @@ const chartPalette = [
   '#9b8066', '#d2c4ad', '#574436', '#9d8e79'
 ];
 
+const EXPENSE_CATEGORIES = ['Food', 'Bills', 'Transportation', 'Groceries', 'Shopping', 'Health', 'Entertainment', 'Other'];
+const INCOME_CATEGORIES = ['Paycheck', 'Business', 'Side Hustle', 'Other Income'];
+let receiptScanData = null;
+let toastTimer = null;
+
 let deferredInstallPrompt = null;
 let calendarCursor = startOfMonth(new Date());
 let selectedCalendarDate = todayISO();
@@ -147,6 +152,10 @@ window.showPage = showPage;
 
 function addTransaction() {
   const type = document.getElementById('txType').value;
+  if (!['expense', 'income'].includes(type)) {
+    alert('Debt payments must be recorded from the Debts section so the remaining balance stays accurate.');
+    return;
+  }
   const amount = Number(document.getElementById('txAmount').value);
   const category = document.getElementById('txCategory').value;
   const date = document.getElementById('txDate').value;
@@ -313,7 +322,9 @@ function transactionRow(t, withDelete = false) {
       </div>
       <div>
         <div class="item-amount ${isIncome ? 'amount-income' : 'amount-out'}">${sign}${peso(t.amount)}</div>
-        ${withDelete ? `<div class="item-actions"><button class="mini-btn" onclick="deleteTransaction('${t.id}')">Delete</button></div>` : ''}
+        ${withDelete ? (t.type === 'debt-payment' && t.debtId
+          ? `<div class="item-actions"><span class="item-sub">Managed in Debts</span></div>`
+          : `<div class="item-actions"><button class="mini-btn" onclick="deleteTransaction('${t.id}')">Delete</button></div>`) : ''}
       </div>
     </div>`;
 }
@@ -533,8 +544,8 @@ function renderCharts() {
   drawAllocationPie('allocationChart', { Expenses: expenses, Bills: bills, Debt: debt });
 
   const spending = aggregate(
-    state.transactions.filter(t => t.type === 'expense' || t.type === 'debt-payment'),
-    t => t.type === 'debt-payment' ? 'Debt Payment' : t.category,
+    state.transactions.filter(t => t.type === 'expense'),
+    t => t.category,
     t => t.amount
   );
   drawBarChart('spendingChart', spending);
@@ -865,33 +876,20 @@ async function sendTestNotification() {
 }
 
 async function renderNotificationStatus() {
-  const statusEl = document.getElementById('notificationStatusText');
-  const backgroundEl = document.getElementById('backgroundStatus');
-  if (!statusEl || !backgroundEl) return;
+  const menuStatus = document.getElementById('menuNotificationStatus');
+  if (!menuStatus) return;
 
   if (!('Notification' in window)) {
-    statusEl.textContent = 'This browser does not support web notifications.';
-    backgroundEl.textContent = '';
+    menuStatus.textContent = 'Notifications are not supported here';
     return;
   }
 
   if (Notification.permission === 'granted') {
-    statusEl.textContent = 'Notifications are allowed. Due reminders will be checked by the installed PWA.';
+    menuStatus.textContent = 'Notifications allowed';
   } else if (Notification.permission === 'denied') {
-    statusEl.textContent = 'Notifications are blocked. Re-enable them in Chrome site settings.';
+    menuStatus.textContent = 'Blocked — change Chrome site settings';
   } else {
-    statusEl.textContent = 'Enable notifications para ma-alert ka sa due dates.';
-  }
-
-  try {
-    const reg = await navigator.serviceWorker.ready;
-    if ('periodicSync' in reg) {
-      backgroundEl.textContent = 'Background check: supported on this device/browser (timing is controlled by Android/Chrome).';
-    } else {
-      backgroundEl.textContent = 'Background check: unavailable here. The app will still check dues whenever you open it.';
-    }
-  } catch {
-    backgroundEl.textContent = '';
+    menuStatus.textContent = 'Allow due-date reminders';
   }
 }
 
@@ -924,8 +922,10 @@ function initPWA() {
           if (!newWorker) return;
           newWorker.addEventListener('statechange', () => {
             if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-              const banner = document.getElementById('updateBanner');
-              if (banner) banner.hidden = false;
+              const dot = document.getElementById('menuUpdateDot');
+              const status = document.getElementById('menuRefreshStatus');
+              if (dot) dot.hidden = false;
+              if (status) status.textContent = 'New version available — tap to refresh';
             }
           });
         });
@@ -936,10 +936,320 @@ function initPWA() {
   }
 }
 
+
+/* ---------------- V3 menu + refresh ---------------- */
+
+function showToast(message, ms = 2600) {
+  const el = document.getElementById('appToast');
+  if (!el) return;
+  clearTimeout(toastTimer);
+  el.textContent = message;
+  el.hidden = false;
+  toastTimer = setTimeout(() => { el.hidden = true; }, ms);
+}
+
+function setMenuOpen(open) {
+  const menu = document.getElementById('appMenu');
+  const trigger = document.getElementById('menuTrigger');
+  if (!menu || !trigger) return;
+  menu.hidden = !open;
+  trigger.setAttribute('aria-expanded', String(open));
+}
+
+async function refreshForLatestVersion() {
+  setMenuOpen(false);
+  const status = document.getElementById('menuRefreshStatus');
+  if (status) status.textContent = 'Checking for updates…';
+  showToast('Checking for the latest Pera Tracker version…');
+
+  try {
+    if ('serviceWorker' in navigator) {
+      const registration = await navigator.serviceWorker.getRegistration();
+      if (registration) {
+        await registration.update();
+        if (registration.waiting) registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      }
+    }
+  } catch (err) {
+    console.warn('Update check failed:', err);
+  }
+
+  setTimeout(() => window.location.reload(), 650);
+}
+
+function updateTransactionCategories() {
+  const typeEl = document.getElementById('txType');
+  const categoryEl = document.getElementById('txCategory');
+  if (!typeEl || !categoryEl) return;
+  const current = categoryEl.value;
+  const categories = typeEl.value === 'income' ? INCOME_CATEGORIES : EXPENSE_CATEGORIES;
+  categoryEl.innerHTML = categories.map(c => `<option>${escapeHtml(c)}</option>`).join('');
+  if (categories.includes(current)) categoryEl.value = current;
+}
+
+/* ---------------- V3 receipt scanner ---------------- */
+
+function resetReceiptScanner() {
+  receiptScanData = null;
+  const workspace = document.getElementById('receiptWorkspace');
+  const preview = document.getElementById('receiptPreview');
+  const raw = document.getElementById('receiptRawText');
+  const items = document.getElementById('receiptItems');
+  const useBtn = document.getElementById('useReceiptBtn');
+  const progress = document.getElementById('receiptScanProgress');
+  if (workspace) workspace.hidden = true;
+  if (preview) preview.removeAttribute('src');
+  if (raw) raw.textContent = '';
+  if (items) items.textContent = 'No details extracted yet.';
+  if (useBtn) useBtn.disabled = true;
+  if (progress) progress.style.width = '0%';
+  text('receiptMerchant', '—');
+  text('receiptDate', '—');
+  text('receiptTotal', '—');
+  text('receiptCategory', '—');
+  text('receiptScanStatus', 'Ready to scan');
+  text('receiptScanHint', 'Review detected details before adding them.');
+  const cam = document.getElementById('receiptCameraInput');
+  const gal = document.getElementById('receiptGalleryInput');
+  if (cam) cam.value = '';
+  if (gal) gal.value = '';
+}
+
+async function handleReceiptFile(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    alert('Please choose an image file.');
+    return;
+  }
+
+  if (!window.Tesseract) {
+    alert('The receipt scanner could not load. Internet is required the first time the OCR engine loads.');
+    return;
+  }
+
+  const workspace = document.getElementById('receiptWorkspace');
+  const preview = document.getElementById('receiptPreview');
+  const useBtn = document.getElementById('useReceiptBtn');
+  const progress = document.getElementById('receiptScanProgress');
+  if (workspace) workspace.hidden = false;
+  if (useBtn) useBtn.disabled = true;
+  if (progress) progress.style.width = '8%';
+
+  const objectUrl = URL.createObjectURL(file);
+  if (preview) preview.src = objectUrl;
+  text('receiptScanStatus', 'Preparing receipt…');
+  text('receiptScanHint', 'Keep the receipt flat and text readable for better results.');
+
+  try {
+    const processed = await preprocessReceiptImage(file);
+    if (progress) progress.style.width = '25%';
+    text('receiptScanStatus', 'Reading receipt text…');
+
+    const worker = await Tesseract.createWorker('eng');
+    if (progress) progress.style.width = '52%';
+    const result = await worker.recognize(processed);
+    if (progress) progress.style.width = '86%';
+    await worker.terminate();
+
+    const rawText = (result && result.data && result.data.text) ? result.data.text : '';
+    const parsed = parseReceiptText(rawText);
+    receiptScanData = { ...parsed, rawText };
+    renderReceiptResult(receiptScanData);
+    if (progress) progress.style.width = '100%';
+    text('receiptScanStatus', parsed.total ? 'Receipt details detected' : 'Scan completed — check the result');
+    text('receiptScanHint', parsed.total ? 'Review the total and category before using it.' : 'The total was not confidently detected; you can still enter it manually.');
+    if (useBtn) useBtn.disabled = !parsed.total;
+  } catch (err) {
+    console.error('Receipt OCR failed:', err);
+    text('receiptScanStatus', 'Unable to read this receipt');
+    text('receiptScanHint', 'Try a clearer photo with less glare and better lighting.');
+    if (progress) progress.style.width = '0%';
+    showToast('Receipt scan failed. Try a clearer photo.', 3500);
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 3000);
+  }
+}
+
+function preprocessReceiptImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      try {
+        const maxWidth = 1800;
+        const scale = Math.min(1, maxWidth / img.width);
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, width, height);
+        const data = ctx.getImageData(0, 0, width, height);
+        for (let i = 0; i < data.data.length; i += 4) {
+          const r = data.data[i], g = data.data[i+1], b = data.data[i+2];
+          let gray = r * .299 + g * .587 + b * .114;
+          gray = Math.max(0, Math.min(255, (gray - 128) * 1.3 + 128));
+          data.data[i] = data.data[i+1] = data.data[i+2] = gray;
+        }
+        ctx.putImageData(data, 0, 0);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL('image/jpeg', .9));
+      } catch (err) {
+        URL.revokeObjectURL(url);
+        reject(err);
+      }
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image could not be loaded.')); };
+    img.src = url;
+  });
+}
+
+function parseReceiptText(rawText) {
+  const lines = String(rawText || '')
+    .split(/\r?\n/)
+    .map(line => line.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  const merchant = detectMerchant(lines);
+  const total = detectReceiptTotal(lines);
+  const date = detectReceiptDate(lines);
+  const itemLines = detectReceiptItems(lines);
+  const category = guessReceiptCategory([merchant, ...itemLines.map(i => i.name), rawText].join(' '));
+
+  return { merchant, total, date, itemLines, category };
+}
+
+function detectMerchant(lines) {
+  const bad = /(official receipt|sales invoice|invoice|receipt|vat reg|tin\b|address|tel\b|telephone|date\b|time\b|cashier|server|table|order\b|qty\b|quantity|subtotal|total|amount|change|cash\b)/i;
+  for (const line of lines.slice(0, 10)) {
+    const letters = (line.match(/[A-Za-z]/g) || []).length;
+    if (line.length >= 3 && letters >= 3 && !bad.test(line) && !/^\d+[\d\s\-\/.:]*$/.test(line)) {
+      return titleCase(line.slice(0, 48));
+    }
+  }
+  return lines[0] ? titleCase(lines[0].slice(0, 48)) : 'Unknown merchant';
+}
+
+function detectReceiptTotal(lines) {
+  const candidates = [];
+  const amountRegex = /(?:₱|PHP\s*)?([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{2})|[0-9]+\.\d{2})/gi;
+  lines.forEach((line, index) => {
+    const lower = line.toLowerCase();
+    let score = 0;
+    if (/grand\s*total|amount\s*due|total\s*due|balance\s*due|net\s*total/.test(lower)) score = 100;
+    else if (/\btotal\b/.test(lower) && !/sub\s*total/.test(lower)) score = 85;
+    else if (/amount/.test(lower)) score = 55;
+    if (/subtotal|tax|vat|change|cash|tender|discount|service charge/.test(lower)) score -= 55;
+
+    const amounts = [...line.matchAll(amountRegex)].map(m => Number(m[1].replace(/,/g, ''))).filter(v => Number.isFinite(v) && v > 0);
+    amounts.forEach(value => candidates.push({ value, score, index }));
+  });
+
+  const strong = candidates.filter(c => c.score >= 50).sort((a, b) => b.score - a.score || b.index - a.index || b.value - a.value);
+  if (strong.length) return strong[0].value;
+
+  const plausible = candidates.filter(c => c.value < 1_000_000).sort((a, b) => b.value - a.value);
+  return plausible.length ? plausible[0].value : null;
+}
+
+function detectReceiptDate(lines) {
+  const text = lines.join(' ');
+  const patterns = [
+    /\b(20\d{2})[-\/.](\d{1,2})[-\/.](\d{1,2})\b/,
+    /\b(\d{1,2})[-\/.](\d{1,2})[-\/.](20\d{2})\b/,
+    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(20\d{2})\b/i
+  ];
+  let m = text.match(patterns[0]);
+  if (m) return validDateISO(Number(m[1]), Number(m[2]), Number(m[3]));
+  m = text.match(patterns[1]);
+  if (m) {
+    const a = Number(m[1]), b = Number(m[2]), y = Number(m[3]);
+    return validDateISO(y, a, b) || validDateISO(y, b, a);
+  }
+  m = text.match(patterns[2]);
+  if (m) {
+    const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
+    const month = monthNames.indexOf(m[1].slice(0,3).toLowerCase()) + 1;
+    return validDateISO(Number(m[3]), month, Number(m[2]));
+  }
+  return null;
+}
+
+function validDateISO(year, month, day) {
+  const d = new Date(year, month - 1, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
+  return isoLocal(d);
+}
+
+function detectReceiptItems(lines) {
+  const exclude = /(subtotal|grand total|\btotal\b|amount due|tax|vat|change|cash|tender|discount|balance|payment|credit card|debit card|invoice|receipt|tin\b|date\b|time\b)/i;
+  const out = [];
+  const re = /^(.*?)(?:\s+)(?:₱|PHP\s*)?([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{2})|[0-9]+\.\d{2})\s*$/i;
+  for (const line of lines) {
+    if (exclude.test(line)) continue;
+    const m = line.match(re);
+    if (!m) continue;
+    const name = m[1].replace(/^[\d\sxX*.-]+/, '').trim();
+    const amount = Number(m[2].replace(/,/g, ''));
+    if (name.length < 2 || !Number.isFinite(amount) || amount <= 0) continue;
+    out.push({ name: titleCase(name.slice(0, 55)), amount });
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+function guessReceiptCategory(textValue) {
+  const t = String(textValue || '').toLowerCase();
+  if (/(supermarket|grocery|grocer|puregold|savemore|sm market|waltermart|robinsons supermarket|marketplace)/.test(t)) return 'Groceries';
+  if (/(restaurant|cafe|coffee|burger|pizza|chicken|jollibee|mcdonald|starbucks|food|bakery|dining|meal)/.test(t)) return 'Food';
+  if (/(grab|taxi|transport|fare|fuel|gasoline|diesel|petron|shell|caltex|parking|toll)/.test(t)) return 'Transportation';
+  if (/(pharmacy|drugstore|mercury drug|watsons|hospital|clinic|medical|medicine)/.test(t)) return 'Health';
+  if (/(electric|meralco|water bill|internet|globe|smart|pldt|converge|utility|bill payment)/.test(t)) return 'Bills';
+  if (/(mall|department store|clothing|apparel|shoes|uniqlo|zara|h&m|hardware|store)/.test(t)) return 'Shopping';
+  if (/(cinema|movie|game|entertainment|netflix|spotify)/.test(t)) return 'Entertainment';
+  return 'Other';
+}
+
+function titleCase(value) {
+  return String(value || '').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function renderReceiptResult(data) {
+  text('receiptMerchant', data.merchant || 'Unknown merchant');
+  text('receiptDate', data.date ? formatDate(data.date) : 'Not detected');
+  text('receiptTotal', data.total ? peso(data.total) : 'Not detected');
+  text('receiptCategory', data.category || 'Other');
+  const raw = document.getElementById('receiptRawText');
+  if (raw) raw.textContent = data.rawText || '';
+  const items = document.getElementById('receiptItems');
+  if (items) {
+    items.innerHTML = data.itemLines && data.itemLines.length
+      ? data.itemLines.map(item => `<div class="receipt-item-line"><span>${escapeHtml(item.name)}</span><strong>${peso(item.amount)}</strong></div>`).join('')
+      : '<span>No individual purchase lines confidently detected.</span>';
+  }
+}
+
+function useReceiptInTracker() {
+  if (!receiptScanData || !receiptScanData.total) return;
+  const typeEl = document.getElementById('txType');
+  typeEl.value = 'expense';
+  updateTransactionCategories();
+  document.getElementById('txAmount').value = receiptScanData.total;
+  document.getElementById('txCategory').value = EXPENSE_CATEGORIES.includes(receiptScanData.category) ? receiptScanData.category : 'Other';
+  document.getElementById('txDate').value = receiptScanData.date || todayISO();
+  const itemSummary = (receiptScanData.itemLines || []).slice(0, 4).map(i => i.name).join(', ');
+  document.getElementById('txNotes').value = [receiptScanData.merchant, itemSummary].filter(Boolean).join(' — ');
+  showToast('Receipt details copied to the Expense Tracker. Review, then Save Transaction.');
+  document.getElementById('txAmount').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 /* ---------------- Events ---------------- */
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('txDate').value = todayISO();
+  updateTransactionCategories();
+
+  document.getElementById('txType').addEventListener('change', updateTransactionCategories);
 
   document.getElementById('calendarPrevBtn').addEventListener('click', () => {
     calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() - 1, 1);
@@ -955,8 +1265,32 @@ document.addEventListener('DOMContentLoaded', () => {
     renderCalendar();
   });
 
-  document.getElementById('enableNotificationsBtn').addEventListener('click', enableNotifications);
-  document.getElementById('testNotificationBtn').addEventListener('click', sendTestNotification);
+  document.getElementById('menuTrigger').addEventListener('click', event => {
+    event.stopPropagation();
+    const menu = document.getElementById('appMenu');
+    setMenuOpen(menu.hidden);
+  });
+  document.getElementById('appMenu').addEventListener('click', event => event.stopPropagation());
+  document.addEventListener('click', () => setMenuOpen(false));
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') setMenuOpen(false); });
+
+  document.getElementById('menuRefreshBtn').addEventListener('click', refreshForLatestVersion);
+  document.getElementById('menuEnableNotificationsBtn').addEventListener('click', async () => {
+    setMenuOpen(false);
+    await enableNotifications();
+    renderNotificationStatus();
+  });
+  document.getElementById('menuTestNotificationBtn').addEventListener('click', async () => {
+    setMenuOpen(false);
+    await sendTestNotification();
+  });
+
+  document.getElementById('scanReceiptCameraBtn').addEventListener('click', () => document.getElementById('receiptCameraInput').click());
+  document.getElementById('scanReceiptGalleryBtn').addEventListener('click', () => document.getElementById('receiptGalleryInput').click());
+  document.getElementById('receiptCameraInput').addEventListener('change', event => handleReceiptFile(event.target.files && event.target.files[0]));
+  document.getElementById('receiptGalleryInput').addEventListener('change', event => handleReceiptFile(event.target.files && event.target.files[0]));
+  document.getElementById('useReceiptBtn').addEventListener('click', useReceiptInTracker);
+  document.getElementById('clearReceiptBtn').addEventListener('click', resetReceiptScanner);
 
   document.getElementById('installTopBtn').addEventListener('click', async () => {
     if (!deferredInstallPrompt) return;
@@ -964,8 +1298,6 @@ document.addEventListener('DOMContentLoaded', () => {
     await deferredInstallPrompt.userChoice;
     deferredInstallPrompt = null;
   });
-
-  document.getElementById('refreshAppBtn').addEventListener('click', () => window.location.reload());
 
   window.addEventListener('resize', debounce(() => renderCharts(), 180));
   document.addEventListener('visibilitychange', () => {

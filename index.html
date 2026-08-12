@@ -15,24 +15,44 @@
 <body>
   <div class="app-shell">
     <header class="topbar">
-      <div>
-        <div class="eyebrow">PERSONAL FINANCE</div>
-        <h1>Pera Tracker</h1>
-        <p class="subtitle">Utang, expenses, income at due dates — isang lugar lang.</p>
+      <div class="topbar-left">
+        <button class="menu-trigger" id="menuTrigger" type="button" aria-label="Open menu" aria-expanded="false">
+          <span></span><span></span><span></span>
+          <i id="menuUpdateDot" class="menu-update-dot" hidden></i>
+        </button>
+        <div>
+          <div class="eyebrow">PERSONAL FINANCE</div>
+          <h1>Pera Tracker</h1>
+          <p class="subtitle">Utang, expenses, income at due dates — isang lugar lang.</p>
+        </div>
       </div>
       <button class="icon-btn" id="installTopBtn" type="button" title="Install app" hidden>Install</button>
+
+      <div class="app-menu" id="appMenu" hidden>
+        <div class="app-menu-head">
+          <div>
+            <strong>Pera Tracker</strong>
+            <small>App controls</small>
+          </div>
+          <span class="version-pill">v3</span>
+        </div>
+        <button class="app-menu-item" id="menuRefreshBtn" type="button">
+          <span class="menu-item-icon">↻</span>
+          <span><strong>Refresh / Update App</strong><small id="menuRefreshStatus">Check for the latest version</small></span>
+        </button>
+        <button class="app-menu-item" id="menuEnableNotificationsBtn" type="button">
+          <span class="menu-item-icon">♢</span>
+          <span><strong>Enable Notifications</strong><small id="menuNotificationStatus">Allow due-date reminders</small></span>
+        </button>
+        <button class="app-menu-item" id="menuTestNotificationBtn" type="button">
+          <span class="menu-item-icon">✓</span>
+          <span><strong>Test Notification</strong><small>Send a test alert to this phone</small></span>
+        </button>
+      </div>
     </header>
 
     <main class="main-content">
       <section id="dashboard" class="page active">
-        <div id="updateBanner" class="notice notice-info" hidden>
-          <div>
-            <strong>May bagong version.</strong>
-            <span>I-refresh para gamitin ang latest update.</span>
-          </div>
-          <button class="btn btn-dark" id="refreshAppBtn" type="button">Refresh</button>
-        </div>
-
         <div class="hero-row">
           <div>
             <div class="eyebrow">OVERVIEW</div>
@@ -88,18 +108,6 @@
           </section>
         </div>
 
-        <section class="panel notification-panel">
-          <div class="notification-copy">
-            <div class="eyebrow">PHONE REMINDERS</div>
-            <h3>Due Date Notifications</h3>
-            <p id="notificationStatusText">Enable notifications para ma-alert ka sa due dates.</p>
-            <div class="notification-meta" id="backgroundStatus"></div>
-          </div>
-          <div class="button-stack">
-            <button class="btn btn-dark" id="enableNotificationsBtn" type="button">Enable Notifications</button>
-            <button class="btn btn-light" id="testNotificationBtn" type="button">Test Notification</button>
-          </div>
-        </section>
       </section>
 
       <section id="tracker" class="page">
@@ -110,6 +118,58 @@
           </div>
         </div>
 
+        <section class="panel receipt-panel">
+          <div class="receipt-head">
+            <div>
+              <div class="eyebrow">SMART RECEIPT CAPTURE</div>
+              <h3>Scan a Receipt</h3>
+              <p>Take a photo or select a receipt. The app will extract the useful expense details first, then you review them before saving.</p>
+            </div>
+            <div class="receipt-actions">
+              <button class="btn btn-dark" id="scanReceiptCameraBtn" type="button">Camera</button>
+              <button class="btn btn-light" id="scanReceiptGalleryBtn" type="button">Choose Photo</button>
+            </div>
+          </div>
+
+          <input id="receiptCameraInput" class="hidden-input" type="file" accept="image/*" capture="environment" />
+          <input id="receiptGalleryInput" class="hidden-input" type="file" accept="image/*" />
+
+          <div class="receipt-workspace" id="receiptWorkspace" hidden>
+            <div class="receipt-preview-wrap">
+              <img id="receiptPreview" class="receipt-preview" alt="Receipt preview" />
+            </div>
+            <div class="receipt-results">
+              <div class="scan-status-row">
+                <strong id="receiptScanStatus">Ready to scan</strong>
+                <span id="receiptScanHint">Review detected details before adding them.</span>
+              </div>
+              <div class="scan-progress"><div id="receiptScanProgress"></div></div>
+
+              <div class="receipt-detail-grid">
+                <div class="receipt-detail"><span>Merchant</span><strong id="receiptMerchant">—</strong></div>
+                <div class="receipt-detail"><span>Date</span><strong id="receiptDate">—</strong></div>
+                <div class="receipt-detail"><span>Total</span><strong id="receiptTotal">—</strong></div>
+                <div class="receipt-detail"><span>Suggested Category</span><strong id="receiptCategory">—</strong></div>
+              </div>
+
+              <div class="receipt-items-box">
+                <span>Detected purchase details</span>
+                <div id="receiptItems">No details extracted yet.</div>
+              </div>
+
+              <div class="receipt-footer-actions">
+                <button class="btn btn-dark" id="useReceiptBtn" type="button" disabled>Use in Expense Tracker</button>
+                <button class="btn btn-light" id="clearReceiptBtn" type="button">Clear</button>
+              </div>
+
+              <details class="raw-ocr-details">
+                <summary>View raw OCR text</summary>
+                <pre id="receiptRawText"></pre>
+              </details>
+            </div>
+          </div>
+        </section>
+
         <section class="panel form-panel">
           <div class="form-grid">
             <div class="field">
@@ -117,7 +177,6 @@
               <select id="txType">
                 <option value="expense">Expense</option>
                 <option value="income">Income</option>
-                <option value="debt-payment">Debt Payment</option>
               </select>
             </div>
             <div class="field">
@@ -134,10 +193,6 @@
                 <option>Shopping</option>
                 <option>Health</option>
                 <option>Entertainment</option>
-                <option>Salary</option>
-                <option>Business</option>
-                <option>Side Hustle</option>
-                <option>Debt Payment</option>
                 <option>Other</option>
               </select>
             </div>
@@ -273,7 +328,7 @@
             <div class="summary-value" id="reportIncome">₱0.00</div>
           </article>
           <article class="summary-card">
-            <div class="summary-label">Total Expenses</div>
+            <div class="summary-label">Actual Expenses</div>
             <div class="summary-value" id="reportExpenses">₱0.00</div>
           </article>
           <article class="summary-card">
@@ -337,8 +392,10 @@
         <span class="nav-icon">▥</span><span>Reports</span>
       </button>
     </nav>
+    <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>
