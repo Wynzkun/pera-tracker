@@ -3,718 +3,342 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#111827" />
+  <meta name="theme-color" content="#1f1a17" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-  <meta name="apple-mobile-web-app-title" content="Money Tracker" />
-  <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="apple-touch-icon" href="icons/icon-192.png" />
-  <title>Money Tracker</title>
-
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    :root { color-scheme: light; }
-    body {
-      font-family: Arial, Helvetica, sans-serif;
-      background: #f4f6f8;
-      color: #1f2937;
-      min-height: 100vh;
-    }
-
-    .app {
-      max-width: 1100px;
-      margin: auto;
-      min-height: 100vh;
-      background: #ffffff;
-    }
-
-    header {
-      padding: calc(18px + env(safe-area-inset-top)) 22px 18px;
-      border-bottom: 1px solid #e5e7eb;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      position: sticky;
-      top: 0;
-      background: rgba(255,255,255,.96);
-      backdrop-filter: blur(12px);
-      z-index: 5;
-    }
-
-    header h1 { font-size: 22px; }
-    header p { color: #6b7280; font-size: 13px; margin-top: 4px; }
-
-    main { padding: 20px; padding-bottom: calc(95px + env(safe-area-inset-bottom)); }
-
-    .install-banner {
-      display: none;
-      margin-bottom: 16px;
-      border: 1px solid #dbe3ef;
-      background: #f8fafc;
-      border-radius: 14px;
-      padding: 14px;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-    }
-    .install-banner.show { display: flex; }
-    .install-banner p { font-size: 13px; color: #475569; line-height: 1.4; }
-
-    .cards {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 12px;
-      margin-bottom: 22px;
-    }
-
-    .card {
-      border: 1px solid #e5e7eb;
-      border-radius: 16px;
-      padding: 16px;
-      background: #fff;
-    }
-
-    .card .label { font-size: 12px; color: #6b7280; margin-bottom: 8px; }
-    .card .value { font-size: 24px; font-weight: 700; }
-
-    .section { margin-top: 24px; }
-    .section-title {
-      display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;
-    }
-    .section-title h2 { font-size: 18px; }
-
-    button {
-      border: 0; cursor: pointer; border-radius: 10px; padding: 10px 14px; font-weight: 600;
-    }
-    .btn-primary { background: #111827; color: white; }
-    .btn-light { background: #eef2f7; color: #111827; }
-
-    .list { display: grid; gap: 10px; }
-    .item {
-      border: 1px solid #e5e7eb;
-      border-radius: 14px;
-      padding: 14px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-    }
-    .item-left { min-width: 0; }
-    .item-title { font-weight: 700; margin-bottom: 4px; }
-    .item-sub { font-size: 12px; color: #6b7280; }
-    .amount { font-weight: 700; white-space: nowrap; }
-    .income { color: #15803d; }
-    .expense { color: #b91c1c; }
-
-    .status {
-      font-size: 11px; padding: 5px 8px; border-radius: 999px; display: inline-block; margin-top: 6px;
-    }
-    .paid { background: #dcfce7; color: #166534; }
-    .soon { background: #fef3c7; color: #92400e; }
-    .today { background: #ffedd5; color: #9a3412; }
-    .overdue { background: #fee2e2; color: #991b1b; }
-
-    .empty {
-      text-align: center; padding: 26px; color: #9ca3af;
-      border: 1px dashed #d1d5db; border-radius: 14px;
-    }
-
-    .bottom-nav {
-      position: fixed;
-      bottom: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: min(1100px, 100%);
-      padding-bottom: env(safe-area-inset-bottom);
-      background: #ffffff;
-      border-top: 1px solid #e5e7eb;
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      z-index: 10;
-    }
-    .nav-btn {
-      background: white; color: #6b7280; border-radius: 0; padding: 14px 4px; font-size: 12px;
-    }
-    .nav-btn.active { color: #111827; background: #f9fafb; }
-
-    .page { display: none; }
-    .page.active { display: block; }
-
-    .form-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
-    .field { display: flex; flex-direction: column; gap: 6px; }
-    .field.full { grid-column: 1 / -1; }
-    label { font-size: 12px; color: #6b7280; font-weight: 700; }
-
-    input, select, textarea {
-      width: 100%; padding: 11px 12px; border: 1px solid #d1d5db;
-      border-radius: 10px; font-size: 14px; outline: none; background: #fff;
-    }
-    textarea { min-height: 80px; resize: vertical; }
-
-    .form-card {
-      border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px; margin-bottom: 18px;
-    }
-    .form-actions { margin-top: 14px; display: flex; gap: 8px; justify-content: flex-end; }
-
-    .debt-progress {
-      height: 8px; background: #eef2f7; border-radius: 999px; overflow: hidden; margin-top: 8px;
-    }
-    .debt-progress > div { height: 100%; background: #111827; }
-
-    @media (max-width: 800px) {
-      .cards { grid-template-columns: repeat(2, 1fr); }
-    }
-
-    @media (max-width: 600px) {
-      header { padding-left: 16px; padding-right: 16px; }
-      main { padding: 14px; padding-bottom: calc(90px + env(safe-area-inset-bottom)); }
-      .cards { grid-template-columns: 1fr 1fr; }
-      .card .value { font-size: 20px; }
-      .form-grid { grid-template-columns: 1fr; }
-      .field.full { grid-column: auto; }
-      .item { align-items: flex-start; }
-      .install-banner { align-items: flex-start; }
-    }
-  </style>
+  <meta name="apple-mobile-web-app-title" content="Pera Tracker" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="stylesheet" href="./styles.css" />
+  <title>Pera Tracker</title>
 </head>
 <body>
-  <div class="app">
-    <header>
+  <div class="app-shell">
+    <header class="topbar">
       <div>
-        <h1>Money Tracker</h1>
-        <p>Debts, expenses, dues, and daily cash flow</p>
+        <div class="eyebrow">PERSONAL FINANCE</div>
+        <h1>Pera Tracker</h1>
+        <p class="subtitle">Utang, expenses, income at due dates — isang lugar lang.</p>
       </div>
-      <button class="btn-light" onclick="resetDemo()">Reset</button>
+      <button class="icon-btn" id="installTopBtn" type="button" title="Install app" hidden>Install</button>
     </header>
 
-    <main>
-      <div id="installBanner" class="install-banner">
-        <div>
-          <strong>Install Money Tracker</strong>
-          <p>Add this app to your Android home screen for a standalone app experience.</p>
-        </div>
-        <button id="installBtn" class="btn-primary">Install</button>
-      </div>
-
+    <main class="main-content">
       <section id="dashboard" class="page active">
-        <div class="cards">
-          <div class="card">
-            <div class="label">Available Cash</div>
-            <div class="value" id="availableCash">₱0.00</div>
+        <div id="updateBanner" class="notice notice-info" hidden>
+          <div>
+            <strong>May bagong version.</strong>
+            <span>I-refresh para gamitin ang latest update.</span>
           </div>
-          <div class="card">
-            <div class="label">Expenses This Month</div>
-            <div class="value" id="monthlyExpenses">₱0.00</div>
-          </div>
-          <div class="card">
-            <div class="label">Total Debt</div>
-            <div class="value" id="totalDebt">₱0.00</div>
-          </div>
-          <div class="card">
-            <div class="label">Due Within 7 Days</div>
-            <div class="value" id="dueSoonTotal">₱0.00</div>
-          </div>
+          <button class="btn btn-dark" id="refreshAppBtn" type="button">Refresh</button>
         </div>
 
-        <div class="section">
-          <div class="section-title">
-            <h2>Upcoming Dues</h2>
-            <button class="btn-primary" onclick="showPage('debts')">+ Add Debt</button>
+        <div class="hero-row">
+          <div>
+            <div class="eyebrow">OVERVIEW</div>
+            <h2>Dashboard</h2>
           </div>
-          <div id="upcomingDues" class="list"></div>
+          <button class="btn btn-dark" type="button" onclick="showPage('tracker')">+ Add Transaction</button>
         </div>
 
-        <div class="section">
-          <div class="section-title">
-            <h2>Recent Transactions</h2>
-            <button class="btn-primary" onclick="showPage('tracker')">+ Add</button>
-          </div>
-          <div id="recentTransactions" class="list"></div>
+        <div class="summary-grid">
+          <article class="summary-card primary-card">
+            <div class="summary-label">Available Cash</div>
+            <div class="summary-value" id="availableCash">₱0.00</div>
+            <div class="summary-foot" id="cashFlowHint">Income less recorded cash out</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Expenses This Month</div>
+            <div class="summary-value" id="monthlyExpenses">₱0.00</div>
+            <div class="summary-foot" id="monthLabel">Current month</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Total Debt</div>
+            <div class="summary-value" id="totalDebt">₱0.00</div>
+            <div class="summary-foot" id="debtCount">0 active debts</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Due Within 7 Days</div>
+            <div class="summary-value" id="dueSoonTotal">₱0.00</div>
+            <div class="summary-foot" id="dueSoonCount">0 upcoming dues</div>
+          </article>
         </div>
+
+        <div class="dashboard-grid">
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="eyebrow">DUE MONITOR</div>
+                <h3>Upcoming Dues</h3>
+              </div>
+              <button class="text-btn" type="button" onclick="showPage('calendar')">View calendar →</button>
+            </div>
+            <div id="upcomingDues" class="list"></div>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head">
+              <div>
+                <div class="eyebrow">RECENT ACTIVITY</div>
+                <h3>Transactions</h3>
+              </div>
+              <button class="text-btn" type="button" onclick="showPage('tracker')">View all →</button>
+            </div>
+            <div id="recentTransactions" class="list"></div>
+          </section>
+        </div>
+
+        <section class="panel notification-panel">
+          <div class="notification-copy">
+            <div class="eyebrow">PHONE REMINDERS</div>
+            <h3>Due Date Notifications</h3>
+            <p id="notificationStatusText">Enable notifications para ma-alert ka sa due dates.</p>
+            <div class="notification-meta" id="backgroundStatus"></div>
+          </div>
+          <div class="button-stack">
+            <button class="btn btn-dark" id="enableNotificationsBtn" type="button">Enable Notifications</button>
+            <button class="btn btn-light" id="testNotificationBtn" type="button">Test Notification</button>
+          </div>
+        </section>
       </section>
 
       <section id="tracker" class="page">
-        <div class="section-title"><h2>Daily Tracker</h2></div>
+        <div class="hero-row">
+          <div>
+            <div class="eyebrow">DAILY MONEY LOG</div>
+            <h2>Daily Tracker</h2>
+          </div>
+        </div>
 
-        <div class="form-card">
+        <section class="panel form-panel">
           <div class="form-grid">
             <div class="field">
-              <label>Type</label>
+              <label for="txType">Type</label>
               <select id="txType">
                 <option value="expense">Expense</option>
                 <option value="income">Income</option>
                 <option value="debt-payment">Debt Payment</option>
               </select>
             </div>
-
             <div class="field">
-              <label>Amount</label>
-              <input id="txAmount" type="number" min="0" step="0.01" placeholder="0.00">
+              <label for="txAmount">Amount</label>
+              <input id="txAmount" inputmode="decimal" type="number" min="0" step="0.01" placeholder="0.00" />
             </div>
-
             <div class="field">
-              <label>Category</label>
+              <label for="txCategory">Category</label>
               <select id="txCategory">
                 <option>Food</option>
-                <option>Transportation</option>
                 <option>Bills</option>
+                <option>Transportation</option>
+                <option>Groceries</option>
                 <option>Shopping</option>
+                <option>Health</option>
+                <option>Entertainment</option>
                 <option>Salary</option>
+                <option>Business</option>
+                <option>Side Hustle</option>
                 <option>Debt Payment</option>
                 <option>Other</option>
               </select>
             </div>
-
             <div class="field">
-              <label>Date</label>
-              <input id="txDate" type="date">
+              <label for="txDate">Date</label>
+              <input id="txDate" type="date" />
             </div>
-
             <div class="field full">
-              <label>Notes</label>
+              <label for="txNotes">Notes</label>
               <textarea id="txNotes" placeholder="Optional notes"></textarea>
             </div>
           </div>
-
           <div class="form-actions">
-            <button class="btn-primary" onclick="addTransaction()">Save Transaction</button>
+            <button class="btn btn-dark" type="button" onclick="addTransaction()">Save Transaction</button>
           </div>
-        </div>
+        </section>
 
-        <div class="section">
-          <div class="section-title"><h2>Transaction History</h2></div>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">HISTORY</div>
+              <h3>Transactions</h3>
+            </div>
+          </div>
           <div id="transactionHistory" class="list"></div>
-        </div>
+        </section>
       </section>
 
       <section id="debts" class="page">
-        <div class="section-title"><h2>My Debts</h2></div>
+        <div class="hero-row">
+          <div>
+            <div class="eyebrow">OBLIGATIONS</div>
+            <h2>My Debts</h2>
+          </div>
+        </div>
 
-        <div class="form-card">
+        <section class="panel form-panel">
           <div class="form-grid">
             <div class="field">
-              <label>Debt Name</label>
-              <input id="debtName" type="text" placeholder="e.g. BPI Credit Card">
+              <label for="debtName">Debt / Bill Name</label>
+              <input id="debtName" type="text" placeholder="e.g. BPI Credit Card" />
             </div>
-
             <div class="field">
-              <label>Original Amount</label>
-              <input id="debtOriginal" type="number" min="0" step="0.01" placeholder="0.00">
+              <label for="debtOriginal">Original Amount</label>
+              <input id="debtOriginal" inputmode="decimal" type="number" min="0" step="0.01" placeholder="0.00" />
             </div>
-
             <div class="field">
-              <label>Current Balance</label>
-              <input id="debtBalance" type="number" min="0" step="0.01" placeholder="0.00">
+              <label for="debtBalance">Current Balance</label>
+              <input id="debtBalance" inputmode="decimal" type="number" min="0" step="0.01" placeholder="0.00" />
             </div>
-
             <div class="field">
-              <label>Amount Due</label>
-              <input id="debtDueAmount" type="number" min="0" step="0.01" placeholder="0.00">
+              <label for="debtDueAmount">Amount Due</label>
+              <input id="debtDueAmount" inputmode="decimal" type="number" min="0" step="0.01" placeholder="0.00" />
             </div>
-
             <div class="field">
-              <label>Next Due Date</label>
-              <input id="debtDueDate" type="date">
+              <label for="debtDueDate">Next Due Date</label>
+              <input id="debtDueDate" type="date" />
             </div>
-
             <div class="field">
-              <label>Reminder</label>
+              <label for="debtReminder">Reminder</label>
               <select id="debtReminder">
                 <option value="7">7 days before</option>
-                <option value="3">3 days before</option>
+                <option value="3" selected>3 days before</option>
                 <option value="1">1 day before</option>
-                <option value="0">On due date</option>
+                <option value="0">On due date only</option>
               </select>
             </div>
           </div>
-
           <div class="form-actions">
-            <button class="btn-primary" onclick="addDebt()">Save Debt</button>
+            <button class="btn btn-dark" type="button" onclick="addDebt()">Save Debt</button>
           </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">DEBT LIST</div>
+              <h3>Balances & Due Dates</h3>
+            </div>
+          </div>
+          <div id="debtList" class="list"></div>
+        </section>
+      </section>
+
+      <section id="calendar" class="page">
+        <div class="hero-row calendar-hero">
+          <div>
+            <div class="eyebrow">DUE DATE PLANNER</div>
+            <h2>Calendar</h2>
+          </div>
+          <button class="btn btn-light" type="button" id="calendarTodayBtn">Today</button>
         </div>
 
-        <div id="debtList" class="list"></div>
+        <section class="panel calendar-panel">
+          <div class="calendar-toolbar">
+            <button class="calendar-arrow" id="calendarPrevBtn" type="button" aria-label="Previous month">‹</button>
+            <div>
+              <div class="eyebrow">MONTH</div>
+              <h3 id="calendarMonthTitle">Month</h3>
+            </div>
+            <button class="calendar-arrow" id="calendarNextBtn" type="button" aria-label="Next month">›</button>
+          </div>
+
+          <div class="calendar-weekdays">
+            <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span>
+            <span>Thu</span><span>Fri</span><span>Sat</span>
+          </div>
+          <div id="calendarGrid" class="calendar-grid"></div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">SELECTED DATE</div>
+              <h3 id="selectedDateTitle">Today</h3>
+            </div>
+          </div>
+          <div id="selectedDateItems" class="list"></div>
+        </section>
       </section>
 
       <section id="reports" class="page">
-        <div class="section-title"><h2>Reports</h2></div>
-
-        <div class="cards">
-          <div class="card">
-            <div class="label">Total Income</div>
-            <div class="value" id="reportIncome">₱0.00</div>
-          </div>
-          <div class="card">
-            <div class="label">Total Expenses</div>
-            <div class="value" id="reportExpenses">₱0.00</div>
-          </div>
-          <div class="card">
-            <div class="label">Debt Payments</div>
-            <div class="value" id="reportDebtPayments">₱0.00</div>
-          </div>
-          <div class="card">
-            <div class="label">Net Cash Flow</div>
-            <div class="value" id="reportNet">₱0.00</div>
+        <div class="hero-row">
+          <div>
+            <div class="eyebrow">MONEY ANALYTICS</div>
+            <h2>Reports</h2>
           </div>
         </div>
 
-        <div class="section">
-          <div class="section-title"><h2>Expense Breakdown</h2></div>
+        <div class="summary-grid">
+          <article class="summary-card">
+            <div class="summary-label">Total Income</div>
+            <div class="summary-value" id="reportIncome">₱0.00</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Total Expenses</div>
+            <div class="summary-value" id="reportExpenses">₱0.00</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Debt Payments</div>
+            <div class="summary-value" id="reportDebtPayments">₱0.00</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Net Cash Flow</div>
+            <div class="summary-value" id="reportNet">₱0.00</div>
+          </article>
+        </div>
+
+        <div class="report-charts">
+          <section class="chart-panel">
+            <div class="chart-title">INCOME BREAKDOWN</div>
+            <div class="chart-layout">
+              <canvas id="incomeChart" class="chart-canvas" width="420" height="300"></canvas>
+              <div id="incomeLegend" class="chart-legend"></div>
+            </div>
+          </section>
+
+          <section class="chart-panel">
+            <div class="chart-title">ACTUAL ALLOCATION SUMMARY</div>
+            <canvas id="allocationChart" class="chart-canvas" width="520" height="300"></canvas>
+          </section>
+
+          <section class="chart-panel chart-wide">
+            <div class="chart-title">TOP SPENDING CATEGORIES</div>
+            <div class="chart-scroll">
+              <canvas id="spendingChart" width="900" height="320"></canvas>
+            </div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <div class="eyebrow">CATEGORY TOTALS</div>
+              <h3>Expense Breakdown</h3>
+            </div>
+          </div>
           <div id="expenseBreakdown" class="list"></div>
-        </div>
+        </section>
       </section>
     </main>
 
     <nav class="bottom-nav">
-      <button class="nav-btn active" data-page="dashboard" onclick="showPage('dashboard', this)">Home</button>
-      <button class="nav-btn" data-page="tracker" onclick="showPage('tracker', this)">Tracker</button>
-      <button class="nav-btn" data-page="debts" onclick="showPage('debts', this)">Debts</button>
-      <button class="nav-btn" data-page="reports" onclick="showPage('reports', this)">Reports</button>
+      <button class="nav-btn active" data-page="dashboard" type="button" onclick="showPage('dashboard', this)">
+        <span class="nav-icon">⌂</span><span>Home</span>
+      </button>
+      <button class="nav-btn" data-page="tracker" type="button" onclick="showPage('tracker', this)">
+        <span class="nav-icon">＋</span><span>Tracker</span>
+      </button>
+      <button class="nav-btn" data-page="debts" type="button" onclick="showPage('debts', this)">
+        <span class="nav-icon">₱</span><span>Debts</span>
+      </button>
+      <button class="nav-btn" data-page="calendar" type="button" onclick="showPage('calendar', this)">
+        <span class="nav-icon">▦</span><span>Calendar</span>
+      </button>
+      <button class="nav-btn" data-page="reports" type="button" onclick="showPage('reports', this)">
+        <span class="nav-icon">▥</span><span>Reports</span>
+      </button>
     </nav>
   </div>
 
-  <script>
-    const STORAGE_KEY = 'moneyTrackerPWA_v1';
-    let deferredPrompt = null;
-
-    let state = JSON.parse(localStorage.getItem(STORAGE_KEY)) || {
-      transactions: [],
-      debts: []
-    };
-
-    const peso = value =>
-      new Intl.NumberFormat('en-PH', {
-        style: 'currency',
-        currency: 'PHP'
-      }).format(Number(value || 0));
-
-    function todayISO() {
-      const d = new Date();
-      d.setMinutes(d.getMinutes() - d.getTimezoneOffset());
-      return d.toISOString().slice(0, 10);
-    }
-
-    document.getElementById('txDate').value = todayISO();
-
-    function saveState() {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-      renderAll();
-    }
-
-    function showPage(pageId, button) {
-      document.querySelectorAll('.page').forEach(page => page.classList.remove('active'));
-      document.getElementById(pageId).classList.add('active');
-
-      document.querySelectorAll('.nav-btn').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.page === pageId);
-      });
-
-      if (button) button.classList.add('active');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-
-    function addTransaction() {
-      const type = document.getElementById('txType').value;
-      const amount = Number(document.getElementById('txAmount').value);
-      const category = document.getElementById('txCategory').value;
-      const date = document.getElementById('txDate').value;
-      const notes = document.getElementById('txNotes').value.trim();
-
-      if (!amount || amount <= 0 || !date) {
-        alert('Please enter a valid amount and date.');
-        return;
-      }
-
-      state.transactions.unshift({
-        id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
-        type, amount, category, date, notes
-      });
-
-      document.getElementById('txAmount').value = '';
-      document.getElementById('txNotes').value = '';
-      saveState();
-    }
-
-    function addDebt() {
-      const name = document.getElementById('debtName').value.trim();
-      const original = Number(document.getElementById('debtOriginal').value);
-      const balance = Number(document.getElementById('debtBalance').value);
-      const dueAmount = Number(document.getElementById('debtDueAmount').value);
-      const dueDate = document.getElementById('debtDueDate').value;
-      const reminderDays = Number(document.getElementById('debtReminder').value);
-
-      if (!name || original <= 0 || balance < 0 || dueAmount < 0 || !dueDate) {
-        alert('Please complete the debt details.');
-        return;
-      }
-
-      state.debts.unshift({
-        id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
-        name, original, balance, dueAmount, dueDate, reminderDays
-      });
-
-      ['debtName','debtOriginal','debtBalance','debtDueAmount','debtDueDate']
-        .forEach(id => document.getElementById(id).value = '');
-
-      saveState();
-    }
-
-    function deleteTransaction(id) {
-      state.transactions = state.transactions.filter(t => t.id !== id);
-      saveState();
-    }
-
-    function deleteDebt(id) {
-      state.debts = state.debts.filter(d => d.id !== id);
-      saveState();
-    }
-
-    function recordPayment(id) {
-      const debt = state.debts.find(d => d.id === id);
-      if (!debt) return;
-
-      const input = prompt(`Payment amount for ${debt.name}:`, debt.dueAmount || '');
-      if (input === null) return;
-
-      const amount = Number(input);
-      if (!amount || amount <= 0) {
-        alert('Invalid payment amount.');
-        return;
-      }
-
-      debt.balance = Math.max(0, debt.balance - amount);
-
-      state.transactions.unshift({
-        id: crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(),
-        type: 'debt-payment',
-        amount,
-        category: 'Debt Payment',
-        date: todayISO(),
-        notes: `Payment for ${debt.name}`
-      });
-
-      saveState();
-    }
-
-    function daysUntil(dateString) {
-      const today = new Date(todayISO() + 'T00:00:00');
-      const target = new Date(dateString + 'T00:00:00');
-      return Math.round((target - today) / 86400000);
-    }
-
-    function debtStatus(debt) {
-      if (debt.balance <= 0) return { text: 'PAID', cls: 'paid' };
-
-      const days = daysUntil(debt.dueDate);
-      if (days < 0) return { text: 'OVERDUE', cls: 'overdue' };
-      if (days === 0) return { text: 'DUE TODAY', cls: 'today' };
-      if (days <= 7) return { text: `DUE IN ${days} DAY${days === 1 ? '' : 'S'}`, cls: 'soon' };
-      return { text: `DUE ${new Date(debt.dueDate + 'T00:00:00').toLocaleDateString()}`, cls: 'soon' };
-    }
-
-    function renderDashboard() {
-      const tx = state.transactions;
-      const debts = state.debts;
-
-      const income = tx.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0);
-      const cashOut = tx.filter(t => t.type !== 'income').reduce((s,t) => s + t.amount, 0);
-      const available = income - cashOut;
-
-      const now = new Date();
-      const currentMonth = now.getMonth();
-      const currentYear = now.getFullYear();
-
-      const monthlyExpenses = tx
-        .filter(t => {
-          const d = new Date(t.date + 'T00:00:00');
-          return t.type === 'expense' &&
-                 d.getMonth() === currentMonth &&
-                 d.getFullYear() === currentYear;
-        })
-        .reduce((s,t) => s + t.amount, 0);
-
-      const totalDebt = debts.reduce((s,d) => s + d.balance, 0);
-
-      const dueSoonTotal = debts
-        .filter(d => {
-          const days = daysUntil(d.dueDate);
-          return d.balance > 0 && days >= 0 && days <= 7;
-        })
-        .reduce((s,d) => s + d.dueAmount, 0);
-
-      document.getElementById('availableCash').textContent = peso(available);
-      document.getElementById('monthlyExpenses').textContent = peso(monthlyExpenses);
-      document.getElementById('totalDebt').textContent = peso(totalDebt);
-      document.getElementById('dueSoonTotal').textContent = peso(dueSoonTotal);
-
-      const dues = [...debts]
-        .filter(d => d.balance > 0)
-        .sort((a,b) => new Date(a.dueDate) - new Date(b.dueDate))
-        .slice(0,5);
-
-      document.getElementById('upcomingDues').innerHTML = dues.length ? dues.map(d => {
-        const status = debtStatus(d);
-        return `
-          <div class="item">
-            <div class="item-left">
-              <div class="item-title">${escapeHtml(d.name)}</div>
-              <div class="item-sub">Due ${formatDate(d.dueDate)} • Balance ${peso(d.balance)}</div>
-              <span class="status ${status.cls}">${status.text}</span>
-            </div>
-            <div class="amount">${peso(d.dueAmount)}</div>
-          </div>`;
-      }).join('') : '<div class="empty">No upcoming dues yet.</div>';
-
-      document.getElementById('recentTransactions').innerHTML = tx.length
-        ? tx.slice(0,5).map(transactionHTML).join('')
-        : '<div class="empty">No transactions yet.</div>';
-    }
-
-    function transactionHTML(t) {
-      const isIncome = t.type === 'income';
-      const sign = isIncome ? '+' : '-';
-      return `
-        <div class="item">
-          <div class="item-left">
-            <div class="item-title">${escapeHtml(t.category)}</div>
-            <div class="item-sub">${formatDate(t.date)}${t.notes ? ' • ' + escapeHtml(t.notes) : ''}</div>
-          </div>
-          <div>
-            <div class="amount ${isIncome ? 'income' : 'expense'}">${sign}${peso(t.amount)}</div>
-            <button class="btn-light" style="margin-top:6px;padding:6px 9px;font-size:11px" onclick="deleteTransaction('${t.id}')">Delete</button>
-          </div>
-        </div>`;
-    }
-
-    function renderTransactions() {
-      const el = document.getElementById('transactionHistory');
-      el.innerHTML = state.transactions.length
-        ? state.transactions.map(transactionHTML).join('')
-        : '<div class="empty">No transactions yet.</div>';
-    }
-
-    function renderDebts() {
-      const el = document.getElementById('debtList');
-
-      if (!state.debts.length) {
-        el.innerHTML = '<div class="empty">No debts added yet.</div>';
-        return;
-      }
-
-      el.innerHTML = state.debts.map(d => {
-        const status = debtStatus(d);
-        const paidPercent = d.original > 0
-          ? Math.min(100, Math.max(0, ((d.original - d.balance) / d.original) * 100))
-          : 0;
-
-        return `
-          <div class="item" style="display:block">
-            <div style="display:flex;justify-content:space-between;gap:12px">
-              <div class="item-left">
-                <div class="item-title">${escapeHtml(d.name)}</div>
-                <div class="item-sub">
-                  Original ${peso(d.original)} • Remaining ${peso(d.balance)}
-                </div>
-                <span class="status ${status.cls}">${status.text}</span>
-              </div>
-              <div class="amount">${peso(d.dueAmount)}</div>
-            </div>
-
-            <div class="debt-progress">
-              <div style="width:${paidPercent}%"></div>
-            </div>
-
-            <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn-primary" onclick="recordPayment('${d.id}')">Record Payment</button>
-              <button class="btn-light" onclick="deleteDebt('${d.id}')">Delete</button>
-            </div>
-          </div>`;
-      }).join('');
-    }
-
-    function renderReports() {
-      const income = state.transactions.filter(t => t.type === 'income').reduce((s,t) => s + t.amount, 0);
-      const expenses = state.transactions.filter(t => t.type === 'expense').reduce((s,t) => s + t.amount, 0);
-      const debtPayments = state.transactions.filter(t => t.type === 'debt-payment').reduce((s,t) => s + t.amount, 0);
-      const net = income - expenses - debtPayments;
-
-      document.getElementById('reportIncome').textContent = peso(income);
-      document.getElementById('reportExpenses').textContent = peso(expenses);
-      document.getElementById('reportDebtPayments').textContent = peso(debtPayments);
-      document.getElementById('reportNet').textContent = peso(net);
-
-      const breakdown = {};
-      state.transactions.filter(t => t.type === 'expense').forEach(t => {
-        breakdown[t.category] = (breakdown[t.category] || 0) + t.amount;
-      });
-
-      const rows = Object.entries(breakdown).sort((a,b) => b[1] - a[1]);
-      document.getElementById('expenseBreakdown').innerHTML = rows.length
-        ? rows.map(([cat, amount]) => `
-          <div class="item">
-            <div class="item-title">${escapeHtml(cat)}</div>
-            <div class="amount">${peso(amount)}</div>
-          </div>`).join('')
-        : '<div class="empty">No expense data yet.</div>';
-    }
-
-    function renderAll() {
-      renderDashboard();
-      renderTransactions();
-      renderDebts();
-      renderReports();
-    }
-
-    function formatDate(dateStr) {
-      return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-PH', {
-        month: 'short', day: 'numeric', year: 'numeric'
-      });
-    }
-
-    function escapeHtml(str='') {
-      return str.replace(/[&<>"']/g, ch => ({
-        '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;'
-      }[ch]));
-    }
-
-    function resetDemo() {
-      if (!confirm('Clear all saved Money Tracker data on this device?')) return;
-      localStorage.removeItem(STORAGE_KEY);
-      state = { transactions: [], debts: [] };
-      renderAll();
-    }
-
-    // PWA install handling
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      deferredPrompt = e;
-      document.getElementById('installBanner').classList.add('show');
-    });
-
-    document.getElementById('installBtn').addEventListener('click', async () => {
-      if (!deferredPrompt) {
-        alert('If the install button is unavailable, open this site in Chrome and use the browser menu > Install app / Add to Home screen.');
-        return;
-      }
-      deferredPrompt.prompt();
-      await deferredPrompt.userChoice;
-      deferredPrompt = null;
-      document.getElementById('installBanner').classList.remove('show');
-    });
-
-    window.addEventListener('appinstalled', () => {
-      document.getElementById('installBanner').classList.remove('show');
-    });
-
-    // Service worker for offline use
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./service-worker.js')
-          .catch(err => console.error('Service worker registration failed:', err));
-      });
-    }
-
-    renderAll();
-  </script>
+  <script src="./app.js"></script>
 </body>
 </html>
