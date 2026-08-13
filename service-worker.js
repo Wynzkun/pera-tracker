@@ -1,7 +1,7 @@
 
 'use strict';
 
-const CACHE_NAME = 'pera-tracker-v3.0';
+const CACHE_NAME = 'pera-tracker-v5.0';
 const DB_NAME = 'peraTrackerDB';
 const DB_VERSION = 1;
 const DEBT_STORE = 'debts';
@@ -13,6 +13,7 @@ const APP_SHELL = [
   './styles.css',
   './app.js',
   './manifest.webmanifest',
+  './version.json',
   './icons/icon-192.png',
   './icons/icon-512.png'
 ];

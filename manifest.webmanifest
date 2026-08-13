@@ -1,7 +1,7 @@
 {
   "name": "Pera Tracker",
   "short_name": "PeraTracker",
-  "description": "Personal debt, expenses, income and due-date tracker.",
+  "description": "Personal debt, expenses, due dates, reports, and photo-to-text OCR tracker.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

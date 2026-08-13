@@ -17,7 +17,8 @@
     <header class="topbar">
       <div class="topbar-left">
         <button class="menu-trigger" id="menuTrigger" type="button" aria-label="Open menu" aria-expanded="false">
-          <span></span><span></span><span></span>
+          <span class="menu-glyph">☰</span>
+          <span class="menu-word">Menu</span>
           <i id="menuUpdateDot" class="menu-update-dot" hidden></i>
         </button>
         <div>
@@ -34,8 +35,13 @@
             <strong>Pera Tracker</strong>
             <small>App controls</small>
           </div>
-          <span class="version-pill">v3</span>
+          <span class="version-pill">v5</span>
         </div>
+        <button class="app-menu-item" id="menuPhotoBtn" type="button">
+          <span class="menu-item-icon">▣</span>
+          <span><strong>Photo → Text</strong><small>Enhanced receipt / photo OCR</small></span>
+        </button>
+        <div class="app-menu-divider"></div>
         <button class="app-menu-item" id="menuRefreshBtn" type="button">
           <span class="menu-item-icon">↻</span>
           <span><strong>Refresh / Update App</strong><small id="menuRefreshStatus">Check for the latest version</small></span>
@@ -58,7 +64,10 @@
             <div class="eyebrow">OVERVIEW</div>
             <h2>Dashboard</h2>
           </div>
-          <button class="btn btn-dark" type="button" onclick="showPage('tracker')">+ Add Transaction</button>
+          <div class="hero-actions">
+            <button class="btn btn-light" type="button" onclick="showPage('photo')">Photo → Text</button>
+            <button class="btn btn-dark" type="button" onclick="showPage('tracker')">+ Add Transaction</button>
+          </div>
         </div>
 
         <div class="summary-grid">
@@ -118,57 +127,7 @@
           </div>
         </div>
 
-        <section class="panel receipt-panel">
-          <div class="receipt-head">
-            <div>
-              <div class="eyebrow">SMART RECEIPT CAPTURE</div>
-              <h3>Scan a Receipt</h3>
-              <p>Take a photo or select a receipt. The app will extract the useful expense details first, then you review them before saving.</p>
-            </div>
-            <div class="receipt-actions">
-              <button class="btn btn-dark" id="scanReceiptCameraBtn" type="button">Camera</button>
-              <button class="btn btn-light" id="scanReceiptGalleryBtn" type="button">Choose Photo</button>
-            </div>
-          </div>
-
-          <input id="receiptCameraInput" class="hidden-input" type="file" accept="image/*" capture="environment" />
-          <input id="receiptGalleryInput" class="hidden-input" type="file" accept="image/*" />
-
-          <div class="receipt-workspace" id="receiptWorkspace" hidden>
-            <div class="receipt-preview-wrap">
-              <img id="receiptPreview" class="receipt-preview" alt="Receipt preview" />
-            </div>
-            <div class="receipt-results">
-              <div class="scan-status-row">
-                <strong id="receiptScanStatus">Ready to scan</strong>
-                <span id="receiptScanHint">Review detected details before adding them.</span>
-              </div>
-              <div class="scan-progress"><div id="receiptScanProgress"></div></div>
-
-              <div class="receipt-detail-grid">
-                <div class="receipt-detail"><span>Merchant</span><strong id="receiptMerchant">—</strong></div>
-                <div class="receipt-detail"><span>Date</span><strong id="receiptDate">—</strong></div>
-                <div class="receipt-detail"><span>Total</span><strong id="receiptTotal">—</strong></div>
-                <div class="receipt-detail"><span>Suggested Category</span><strong id="receiptCategory">—</strong></div>
-              </div>
-
-              <div class="receipt-items-box">
-                <span>Detected purchase details</span>
-                <div id="receiptItems">No details extracted yet.</div>
-              </div>
-
-              <div class="receipt-footer-actions">
-                <button class="btn btn-dark" id="useReceiptBtn" type="button" disabled>Use in Expense Tracker</button>
-                <button class="btn btn-light" id="clearReceiptBtn" type="button">Clear</button>
-              </div>
-
-              <details class="raw-ocr-details">
-                <summary>View raw OCR text</summary>
-                <pre id="receiptRawText"></pre>
-              </details>
-            </div>
-          </div>
-        </section>
+        <div class="tracker-note">Debt payments are recorded under <strong>My Debts → Record Payment</strong> so the debt balance and cash flow stay linked.</div>
 
         <section class="panel form-panel">
           <div class="form-grid">
@@ -314,6 +273,79 @@
         </section>
       </section>
 
+
+      <section id="photo" class="page">
+        <div class="hero-row">
+          <div>
+            <div class="eyebrow">PHOTO OCR</div>
+            <h2>Photo → Text</h2>
+          </div>
+        </div>
+
+        <section class="panel photo-capture-panel">
+          <div class="photo-capture-head">
+            <div>
+              <div class="eyebrow">CAPTURE</div>
+              <h3>Take a photo or choose an image</h3>
+              <p>Enhanced for thermal and dot-matrix receipts, shadows, wrinkles, and low-resolution photos. The app automatically upscales and scans the image twice before placing the clearest text into the editable notepad.<br><strong>Best result:</strong> fill most of the camera frame with the receipt, keep it as flat as possible, and avoid glare.</p>
+            </div>
+            <div class="photo-actions">
+              <button class="btn btn-dark" id="photoCameraBtn" type="button">📷 Take Photo</button>
+              <button class="btn btn-light" id="photoGalleryBtn" type="button">Choose Image</button>
+            </div>
+          </div>
+
+          <input id="photoCameraInput" class="hidden-input" type="file" accept="image/*" capture="environment" />
+          <input id="photoGalleryInput" class="hidden-input" type="file" accept="image/*" />
+
+          <div id="photoWorkspace" class="photo-workspace" hidden>
+            <div class="photo-preview-column">
+              <div class="photo-preview-frame">
+                <img id="photoPreview" alt="Selected photo preview" />
+              </div>
+              <div class="ocr-status-card">
+                <div class="ocr-status-line">
+                  <strong id="photoOcrStatus">Photo loaded</strong>
+                  <span id="photoOcrPercent">0%</span>
+                </div>
+                <div class="scan-progress"><div id="photoOcrProgress"></div></div>
+                <p id="photoOcrHint">OCR will start automatically.</p>
+              </div>
+            </div>
+
+            <div class="photo-notepad-column">
+              <div class="notepad-topbar">
+                <div>
+                  <div class="eyebrow">EXTRACTED TEXT</div>
+                  <h3>Clipboard Notepad</h3>
+                </div>
+                <div class="notepad-actions">
+                  <button class="mini-btn" id="copyPhotoTextBtn" type="button">Copy</button>
+                  <button class="mini-btn" id="clearPhotoBtn" type="button">Clear</button>
+                </div>
+              </div>
+              <textarea id="photoTextOutput" class="photo-notepad" placeholder="Extracted text will appear here. You can edit it after scanning."></textarea>
+
+              <div id="receiptSummary" class="receipt-summary" hidden>
+                <div class="receipt-summary-head">
+                  <div>
+                    <div class="eyebrow">RECEIPT DETAILS</div>
+                    <h3>Possible expense detected</h3>
+                  </div>
+                  <button class="btn btn-dark" id="sendPhotoToExpenseBtn" type="button">Use as Expense</button>
+                </div>
+                <div class="receipt-summary-grid">
+                  <div><span>Merchant</span><strong id="photoMerchant">—</strong></div>
+                  <div><span>Date</span><strong id="photoDate">—</strong></div>
+                  <div><span>Total</span><strong id="photoTotal">—</strong></div>
+                  <div><span>Category</span><strong id="photoCategory">—</strong></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+
       <section id="reports" class="page">
         <div class="hero-row">
           <div>
@@ -395,7 +427,6 @@
     <div id="appToast" class="app-toast" role="status" aria-live="polite" hidden></div>
   </div>
 
-  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

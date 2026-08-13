@@ -16,7 +16,8 @@ const chartPalette = [
 
 const EXPENSE_CATEGORIES = ['Food', 'Bills', 'Transportation', 'Groceries', 'Shopping', 'Health', 'Entertainment', 'Other'];
 const INCOME_CATEGORIES = ['Paycheck', 'Business', 'Side Hustle', 'Other Income'];
-let receiptScanData = null;
+let photoScanData = null;
+let currentPhotoObjectUrl = null;
 let toastTimer = null;
 
 let deferredInstallPrompt = null;
@@ -959,22 +960,33 @@ function setMenuOpen(open) {
 async function refreshForLatestVersion() {
   setMenuOpen(false);
   const status = document.getElementById('menuRefreshStatus');
-  if (status) status.textContent = 'Checking for updates…';
-  showToast('Checking for the latest Pera Tracker version…');
+  if (status) status.textContent = 'Downloading latest app files…';
+  showToast('Refreshing Pera Tracker to the latest version…', 3000);
 
   try {
     if ('serviceWorker' in navigator) {
-      const registration = await navigator.serviceWorker.getRegistration();
-      if (registration) {
-        await registration.update();
-        if (registration.waiting) registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      for (const registration of registrations) {
+        try {
+          await registration.update();
+          if (registration.waiting) registration.waiting.postMessage({ type: 'SKIP_WAITING' });
+        } catch (err) {
+          console.warn('Service worker update failed:', err);
+        }
       }
     }
+
+    if ('caches' in window) {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(key => key.startsWith('pera-tracker-')).map(key => caches.delete(key)));
+    }
   } catch (err) {
-    console.warn('Update check failed:', err);
+    console.warn('Refresh cleanup failed:', err);
   }
 
-  setTimeout(() => window.location.reload(), 650);
+  const url = new URL(window.location.href);
+  url.searchParams.set('v', Date.now().toString());
+  setTimeout(() => window.location.replace(url.toString()), 450);
 }
 
 function updateTransactionCategories() {
@@ -987,260 +999,641 @@ function updateTransactionCategories() {
   if (categories.includes(current)) categoryEl.value = current;
 }
 
-/* ---------------- V3 receipt scanner ---------------- */
+/* ---------------- V4 Photo -> Text OCR ---------------- */
 
-function resetReceiptScanner() {
-  receiptScanData = null;
-  const workspace = document.getElementById('receiptWorkspace');
-  const preview = document.getElementById('receiptPreview');
-  const raw = document.getElementById('receiptRawText');
-  const items = document.getElementById('receiptItems');
-  const useBtn = document.getElementById('useReceiptBtn');
-  const progress = document.getElementById('receiptScanProgress');
+const TESSERACT_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+let tesseractLoadPromise = null;
+
+function ensureTesseractLoaded() {
+  if (window.Tesseract) return Promise.resolve(window.Tesseract);
+  if (tesseractLoadPromise) return tesseractLoadPromise;
+
+  tesseractLoadPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector('script[data-pera-tesseract]');
+    if (existing) {
+      existing.addEventListener('load', () => resolve(window.Tesseract), { once: true });
+      existing.addEventListener('error', () => reject(new Error('OCR library failed to load')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = TESSERACT_CDN;
+    script.async = true;
+    script.dataset.peraTesseract = 'true';
+    script.onload = () => window.Tesseract ? resolve(window.Tesseract) : reject(new Error('OCR library unavailable'));
+    script.onerror = () => reject(new Error('OCR library failed to download'));
+    document.head.appendChild(script);
+  });
+
+  return tesseractLoadPromise;
+}
+
+function setPhotoOcrProgress(percent, status, hint) {
+  const pct = Math.max(0, Math.min(100, Math.round(Number(percent || 0))));
+  const bar = document.getElementById('photoOcrProgress');
+  if (bar) bar.style.width = `${pct}%`;
+  text('photoOcrPercent', `${pct}%`);
+  if (status) text('photoOcrStatus', status);
+  if (hint) text('photoOcrHint', hint);
+}
+
+function resetPhotoWorkspace() {
+  photoScanData = null;
+  if (currentPhotoObjectUrl) {
+    URL.revokeObjectURL(currentPhotoObjectUrl);
+    currentPhotoObjectUrl = null;
+  }
+  const workspace = document.getElementById('photoWorkspace');
+  const preview = document.getElementById('photoPreview');
+  const output = document.getElementById('photoTextOutput');
+  const summary = document.getElementById('receiptSummary');
   if (workspace) workspace.hidden = true;
   if (preview) preview.removeAttribute('src');
-  if (raw) raw.textContent = '';
-  if (items) items.textContent = 'No details extracted yet.';
-  if (useBtn) useBtn.disabled = true;
-  if (progress) progress.style.width = '0%';
-  text('receiptMerchant', '—');
-  text('receiptDate', '—');
-  text('receiptTotal', '—');
-  text('receiptCategory', '—');
-  text('receiptScanStatus', 'Ready to scan');
-  text('receiptScanHint', 'Review detected details before adding them.');
-  const cam = document.getElementById('receiptCameraInput');
-  const gal = document.getElementById('receiptGalleryInput');
-  if (cam) cam.value = '';
-  if (gal) gal.value = '';
+  if (output) output.value = '';
+  if (summary) summary.hidden = true;
+  setPhotoOcrProgress(0, 'Waiting for a photo', 'Take a photo or choose an image.');
+  ['photoCameraInput', 'photoGalleryInput'].forEach(id => {
+    const input = document.getElementById(id);
+    if (input) input.value = '';
+  });
 }
 
-async function handleReceiptFile(file) {
-  if (!file || !file.type.startsWith('image/')) {
-    alert('Please choose an image file.');
+async function handlePhotoFile(file) {
+  if (!file || !file.type || !file.type.startsWith('image/')) {
+    showToast('Please select an image.', 3000);
     return;
   }
 
-  if (!window.Tesseract) {
-    alert('The receipt scanner could not load. Internet is required the first time the OCR engine loads.');
-    return;
-  }
+  const workspace = document.getElementById('photoWorkspace');
+  const preview = document.getElementById('photoPreview');
+  const output = document.getElementById('photoTextOutput');
+  const summary = document.getElementById('receiptSummary');
 
-  const workspace = document.getElementById('receiptWorkspace');
-  const preview = document.getElementById('receiptPreview');
-  const useBtn = document.getElementById('useReceiptBtn');
-  const progress = document.getElementById('receiptScanProgress');
   if (workspace) workspace.hidden = false;
-  if (useBtn) useBtn.disabled = true;
-  if (progress) progress.style.width = '8%';
+  if (summary) summary.hidden = true;
+  if (output) output.value = '';
 
-  const objectUrl = URL.createObjectURL(file);
-  if (preview) preview.src = objectUrl;
-  text('receiptScanStatus', 'Preparing receipt…');
-  text('receiptScanHint', 'Keep the receipt flat and text readable for better results.');
+  if (currentPhotoObjectUrl) URL.revokeObjectURL(currentPhotoObjectUrl);
+  currentPhotoObjectUrl = URL.createObjectURL(file);
+  if (preview) preview.src = currentPhotoObjectUrl;
+
+  setPhotoOcrProgress(3, 'Photo loaded', 'Enhanced receipt scan is preparing the image…');
 
   try {
-    const processed = await preprocessReceiptImage(file);
-    if (progress) progress.style.width = '25%';
-    text('receiptScanStatus', 'Reading receipt text…');
+    const TesseractLib = await ensureTesseractLoaded();
+    setPhotoOcrProgress(8, 'OCR engine ready', 'Upscaling and enhancing faint receipt text…');
 
-    const worker = await Tesseract.createWorker('eng');
-    if (progress) progress.style.width = '52%';
-    const result = await worker.recognize(processed);
-    if (progress) progress.style.width = '86%';
+    const variants = await preprocessPhotoVariants(file);
+    setPhotoOcrProgress(18, 'Image enhanced', 'Running receipt OCR pass 1 of 2…');
+
+    let ocrPhase = 1;
+    const worker = await TesseractLib.createWorker('eng', 1, {
+      logger: message => {
+        if (!message || typeof message.progress !== 'number') return;
+        // Each recognition pass updates this callback. The active range is controlled below.
+        const phase = Number(ocrPhase || 1);
+        const startPct = phase === 1 ? 18 : 57;
+        const span = phase === 1 ? 34 : 35;
+        const mapped = startPct + (message.progress * span);
+        const status = message.status ? titleCaseWords(message.status) : 'Reading receipt';
+        setPhotoOcrProgress(mapped, status, `Enhanced receipt scan • pass ${phase} of 2`);
+      }
+    });
+
+    await worker.setParameters({
+      preserve_interword_spaces: '1',
+      user_defined_dpi: '300',
+      tessedit_pageseg_mode: '6'
+    });
+
+    ocrPhase = 1;
+    const first = await worker.recognize(variants.enhanced, { rotateAuto: true });
+
+    setPhotoOcrProgress(56, 'First pass complete', 'Running a second pass for faint totals and dot-matrix text…');
+    await worker.setParameters({
+      preserve_interword_spaces: '1',
+      user_defined_dpi: '300',
+      tessedit_pageseg_mode: '11'
+    });
+
+    ocrPhase = 2;
+    const second = await worker.recognize(variants.binary, { rotateAuto: true });
     await worker.terminate();
 
-    const rawText = (result && result.data && result.data.text) ? result.data.text : '';
-    const parsed = parseReceiptText(rawText);
-    receiptScanData = { ...parsed, rawText };
-    renderReceiptResult(receiptScanData);
-    if (progress) progress.style.width = '100%';
-    text('receiptScanStatus', parsed.total ? 'Receipt details detected' : 'Scan completed — check the result');
-    text('receiptScanHint', parsed.total ? 'Review the total and category before using it.' : 'The total was not confidently detected; you can still enter it manually.');
-    if (useBtn) useBtn.disabled = !parsed.total;
+    setPhotoOcrProgress(94, 'Comparing OCR passes', 'Choosing the clearest text and receipt details…');
+
+    const candidates = [first, second].map((result, index) => {
+      const rawText = result?.data?.text || '';
+      const cleanedText = cleanOcrText(rawText);
+      return {
+        pass: index + 1,
+        rawText,
+        cleanedText,
+        confidence: Number(result?.data?.confidence || 0),
+        score: scoreReceiptOcrCandidate(cleanedText, Number(result?.data?.confidence || 0))
+      };
+    });
+
+    candidates.sort((a, b) => b.score - a.score);
+    const best = candidates[0];
+    const alternate = candidates[1];
+    const displayText = mergeImportantReceiptLines(best.cleanedText, alternate?.cleanedText || '');
+    const parsingText = candidates.map(c => c.cleanedText).filter(Boolean).join('\n');
+
+    if (output) output.value = displayText || '[No readable text detected]';
+
+    const parsed = parsePhotoAsReceipt(parsingText);
+    photoScanData = {
+      rawText: best.rawText,
+      cleanedText: displayText,
+      allOcrText: parsingText,
+      confidence: best.confidence,
+      ...parsed
+    };
+    renderPhotoReceiptSummary(parsed);
+
+    const quality = best.confidence >= 70 ? 'High' : best.confidence >= 45 ? 'Moderate' : 'Low';
+    setPhotoOcrProgress(
+      100,
+      displayText ? 'Enhanced scan complete' : 'No readable text found',
+      displayText
+        ? `${quality} OCR confidence. Review the editable notepad before using any amount.`
+        : 'Try filling the frame with the receipt, keeping it flat, and avoiding glare.'
+    );
+    if (displayText) showToast('Enhanced receipt scan complete.', 2800);
   } catch (err) {
-    console.error('Receipt OCR failed:', err);
-    text('receiptScanStatus', 'Unable to read this receipt');
-    text('receiptScanHint', 'Try a clearer photo with less glare and better lighting.');
-    if (progress) progress.style.width = '0%';
-    showToast('Receipt scan failed. Try a clearer photo.', 3500);
-  } finally {
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 3000);
+    console.error('Photo OCR failed:', err);
+    if (output) output.value = 'OCR could not read this image. Please try again with a clearer photo.';
+    setPhotoOcrProgress(0, 'OCR failed', 'Internet is needed the first time the OCR engine loads. Try again with a clear, well-lit photo.');
+    showToast('Photo OCR failed. Try again while online.', 3500);
   }
 }
 
-function preprocessReceiptImage(file) {
+/**
+ * Builds two OCR-friendly canvases:
+ * 1) auto-leveled grayscale + sharpening for general receipt text
+ * 2) adaptive local threshold for faint thermal/dot-matrix printing and uneven shadows
+ *
+ * Unlike V4, small phone images are deliberately UPSCALED before OCR.
+ */
+function preprocessPhotoVariants(file) {
   return new Promise((resolve, reject) => {
     const img = new Image();
     const url = URL.createObjectURL(file);
+
     img.onload = () => {
       try {
-        const maxWidth = 1800;
-        const scale = Math.min(1, maxWidth / img.width);
-        const width = Math.max(1, Math.round(img.width * scale));
-        const height = Math.max(1, Math.round(img.height * scale));
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        ctx.drawImage(img, 0, 0, width, height);
-        const data = ctx.getImageData(0, 0, width, height);
-        for (let i = 0; i < data.data.length; i += 4) {
-          const r = data.data[i], g = data.data[i+1], b = data.data[i+2];
-          let gray = r * .299 + g * .587 + b * .114;
-          gray = Math.max(0, Math.min(255, (gray - 128) * 1.3 + 128));
-          data.data[i] = data.data[i+1] = data.data[i+2] = gray;
+        const sourceW = Math.max(1, img.naturalWidth || img.width);
+        const sourceH = Math.max(1, img.naturalHeight || img.height);
+        const sourceLong = Math.max(sourceW, sourceH);
+
+        // Small receipt photos need significantly more pixels for Tesseract.
+        // Keep memory reasonable on mobile while preserving large originals.
+        let targetLong;
+        if (sourceLong < 900) targetLong = 2400;
+        else if (sourceLong < 1500) targetLong = 2500;
+        else if (sourceLong < 2300) targetLong = 2500;
+        else targetLong = Math.min(sourceLong, 2800);
+
+        let scale = Math.min(6, targetLong / sourceLong);
+        const maxPixels = 5_600_000;
+        const projectedPixels = sourceW * sourceH * scale * scale;
+        if (projectedPixels > maxPixels) {
+          scale = Math.sqrt(maxPixels / (sourceW * sourceH));
         }
-        ctx.putImageData(data, 0, 0);
+        const width = Math.max(1, Math.round(sourceW * scale));
+        const height = Math.max(1, Math.round(sourceH * scale));
+
+        const base = document.createElement('canvas');
+        base.width = width;
+        base.height = height;
+        const bctx = base.getContext('2d', { willReadFrequently: true });
+        bctx.imageSmoothingEnabled = true;
+        bctx.imageSmoothingQuality = 'high';
+        bctx.fillStyle = '#ffffff';
+        bctx.fillRect(0, 0, width, height);
+        bctx.drawImage(img, 0, 0, width, height);
+
+        const src = bctx.getImageData(0, 0, width, height);
+        const px = src.data;
+        const count = width * height;
+        const gray = new Uint8ClampedArray(count);
+        const histogram = new Uint32Array(256);
+
+        for (let p = 0, i = 0; p < count; p++, i += 4) {
+          const g = Math.max(0, Math.min(255, Math.round(0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2])));
+          gray[p] = g;
+          histogram[g]++;
+        }
+
+        const low = histogramPercentile(histogram, count, 0.025);
+        const high = histogramPercentile(histogram, count, 0.985);
+        const range = Math.max(28, high - low);
+        const leveled = new Uint8ClampedArray(count);
+
+        for (let p = 0; p < count; p++) {
+          let v = (gray[p] - low) * 255 / range;
+          v = Math.max(0, Math.min(255, v));
+          // Slight gamma lift keeps faded thermal paper readable.
+          v = 255 * Math.pow(v / 255, 0.88);
+          leveled[p] = Math.round(v);
+        }
+
+        const sharpened = sharpenReceiptGray(leveled, width, height);
+
+        const enhanced = document.createElement('canvas');
+        enhanced.width = width;
+        enhanced.height = height;
+        const ectx = enhanced.getContext('2d', { willReadFrequently: true });
+        const enhancedImage = ectx.createImageData(width, height);
+        for (let p = 0, i = 0; p < count; p++, i += 4) {
+          const v = sharpened[p];
+          enhancedImage.data[i] = v;
+          enhancedImage.data[i + 1] = v;
+          enhancedImage.data[i + 2] = v;
+          enhancedImage.data[i + 3] = 255;
+        }
+        ectx.putImageData(enhancedImage, 0, 0);
+
+        // Adaptive threshold is much better than one global threshold when a receipt
+        // has hand shadows, creases, glare or faded dot-matrix printing.
+        const binaryGray = adaptiveThresholdReceipt(sharpened, width, height);
+        const binary = document.createElement('canvas');
+        binary.width = width;
+        binary.height = height;
+        const binctx = binary.getContext('2d', { willReadFrequently: true });
+        const binaryImage = binctx.createImageData(width, height);
+        for (let p = 0, i = 0; p < count; p++, i += 4) {
+          const v = binaryGray[p];
+          binaryImage.data[i] = v;
+          binaryImage.data[i + 1] = v;
+          binaryImage.data[i + 2] = v;
+          binaryImage.data[i + 3] = 255;
+        }
+        binctx.putImageData(binaryImage, 0, 0);
+
         URL.revokeObjectURL(url);
-        resolve(canvas.toDataURL('image/jpeg', .9));
-      } catch (err) {
+        resolve({ enhanced, binary, width, height });
+      } catch (e) {
         URL.revokeObjectURL(url);
-        reject(err);
+        reject(e);
       }
     };
-    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Image could not be loaded.')); };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Image could not be opened'));
+    };
     img.src = url;
   });
 }
 
-function parseReceiptText(rawText) {
-  const lines = String(rawText || '')
-    .split(/\r?\n/)
-    .map(line => line.replace(/\s+/g, ' ').trim())
-    .filter(Boolean);
-
-  const merchant = detectMerchant(lines);
-  const total = detectReceiptTotal(lines);
-  const date = detectReceiptDate(lines);
-  const itemLines = detectReceiptItems(lines);
-  const category = guessReceiptCategory([merchant, ...itemLines.map(i => i.name), rawText].join(' '));
-
-  return { merchant, total, date, itemLines, category };
+function histogramPercentile(histogram, total, percentile) {
+  const target = Math.max(1, Math.floor(total * percentile));
+  let running = 0;
+  for (let i = 0; i < histogram.length; i++) {
+    running += histogram[i];
+    if (running >= target) return i;
+  }
+  return 255;
 }
 
-function detectMerchant(lines) {
-  const bad = /(official receipt|sales invoice|invoice|receipt|vat reg|tin\b|address|tel\b|telephone|date\b|time\b|cashier|server|table|order\b|qty\b|quantity|subtotal|total|amount|change|cash\b)/i;
-  for (const line of lines.slice(0, 10)) {
-    const letters = (line.match(/[A-Za-z]/g) || []).length;
-    if (line.length >= 3 && letters >= 3 && !bad.test(line) && !/^\d+[\d\s\-\/.:]*$/.test(line)) {
-      return titleCase(line.slice(0, 48));
+function sharpenReceiptGray(input, width, height) {
+  const out = new Uint8ClampedArray(input.length);
+  out.set(input);
+  if (width < 3 || height < 3) return out;
+
+  // Gentle unsharp cross kernel; enough for thermal/dot-matrix strokes without
+  // turning paper texture into heavy black noise.
+  for (let y = 1; y < height - 1; y++) {
+    const row = y * width;
+    for (let x = 1; x < width - 1; x++) {
+      const p = row + x;
+      const center = input[p] * 5;
+      const neighbors = input[p - 1] + input[p + 1] + input[p - width] + input[p + width];
+      const v = center - neighbors;
+      out[p] = Math.max(0, Math.min(255, v));
     }
-  }
-  return lines[0] ? titleCase(lines[0].slice(0, 48)) : 'Unknown merchant';
-}
-
-function detectReceiptTotal(lines) {
-  const candidates = [];
-  const amountRegex = /(?:₱|PHP\s*)?([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{2})|[0-9]+\.\d{2})/gi;
-  lines.forEach((line, index) => {
-    const lower = line.toLowerCase();
-    let score = 0;
-    if (/grand\s*total|amount\s*due|total\s*due|balance\s*due|net\s*total/.test(lower)) score = 100;
-    else if (/\btotal\b/.test(lower) && !/sub\s*total/.test(lower)) score = 85;
-    else if (/amount/.test(lower)) score = 55;
-    if (/subtotal|tax|vat|change|cash|tender|discount|service charge/.test(lower)) score -= 55;
-
-    const amounts = [...line.matchAll(amountRegex)].map(m => Number(m[1].replace(/,/g, ''))).filter(v => Number.isFinite(v) && v > 0);
-    amounts.forEach(value => candidates.push({ value, score, index }));
-  });
-
-  const strong = candidates.filter(c => c.score >= 50).sort((a, b) => b.score - a.score || b.index - a.index || b.value - a.value);
-  if (strong.length) return strong[0].value;
-
-  const plausible = candidates.filter(c => c.value < 1_000_000).sort((a, b) => b.value - a.value);
-  return plausible.length ? plausible[0].value : null;
-}
-
-function detectReceiptDate(lines) {
-  const text = lines.join(' ');
-  const patterns = [
-    /\b(20\d{2})[-\/.](\d{1,2})[-\/.](\d{1,2})\b/,
-    /\b(\d{1,2})[-\/.](\d{1,2})[-\/.](20\d{2})\b/,
-    /\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(\d{1,2}),?\s+(20\d{2})\b/i
-  ];
-  let m = text.match(patterns[0]);
-  if (m) return validDateISO(Number(m[1]), Number(m[2]), Number(m[3]));
-  m = text.match(patterns[1]);
-  if (m) {
-    const a = Number(m[1]), b = Number(m[2]), y = Number(m[3]);
-    return validDateISO(y, a, b) || validDateISO(y, b, a);
-  }
-  m = text.match(patterns[2]);
-  if (m) {
-    const monthNames = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
-    const month = monthNames.indexOf(m[1].slice(0,3).toLowerCase()) + 1;
-    return validDateISO(Number(m[3]), month, Number(m[2]));
-  }
-  return null;
-}
-
-function validDateISO(year, month, day) {
-  const d = new Date(year, month - 1, day);
-  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
-  return isoLocal(d);
-}
-
-function detectReceiptItems(lines) {
-  const exclude = /(subtotal|grand total|\btotal\b|amount due|tax|vat|change|cash|tender|discount|balance|payment|credit card|debit card|invoice|receipt|tin\b|date\b|time\b)/i;
-  const out = [];
-  const re = /^(.*?)(?:\s+)(?:₱|PHP\s*)?([0-9]{1,3}(?:,[0-9]{3})*(?:\.\d{2})|[0-9]+\.\d{2})\s*$/i;
-  for (const line of lines) {
-    if (exclude.test(line)) continue;
-    const m = line.match(re);
-    if (!m) continue;
-    const name = m[1].replace(/^[\d\sxX*.-]+/, '').trim();
-    const amount = Number(m[2].replace(/,/g, ''));
-    if (name.length < 2 || !Number.isFinite(amount) || amount <= 0) continue;
-    out.push({ name: titleCase(name.slice(0, 55)), amount });
-    if (out.length >= 8) break;
   }
   return out;
 }
 
-function guessReceiptCategory(textValue) {
-  const t = String(textValue || '').toLowerCase();
-  if (/(supermarket|grocery|grocer|puregold|savemore|sm market|waltermart|robinsons supermarket|marketplace)/.test(t)) return 'Groceries';
-  if (/(restaurant|cafe|coffee|burger|pizza|chicken|jollibee|mcdonald|starbucks|food|bakery|dining|meal)/.test(t)) return 'Food';
-  if (/(grab|taxi|transport|fare|fuel|gasoline|diesel|petron|shell|caltex|parking|toll)/.test(t)) return 'Transportation';
-  if (/(pharmacy|drugstore|mercury drug|watsons|hospital|clinic|medical|medicine)/.test(t)) return 'Health';
-  if (/(electric|meralco|water bill|internet|globe|smart|pldt|converge|utility|bill payment)/.test(t)) return 'Bills';
-  if (/(mall|department store|clothing|apparel|shoes|uniqlo|zara|h&m|hardware|store)/.test(t)) return 'Shopping';
-  if (/(cinema|movie|game|entertainment|netflix|spotify)/.test(t)) return 'Entertainment';
+function adaptiveThresholdReceipt(input, width, height) {
+  const out = new Uint8ClampedArray(input.length);
+  const integralW = width + 1;
+  const integral = new Uint32Array((width + 1) * (height + 1));
+
+  for (let y = 1; y <= height; y++) {
+    let rowSum = 0;
+    const srcRow = (y - 1) * width;
+    const intRow = y * integralW;
+    const prevRow = (y - 1) * integralW;
+    for (let x = 1; x <= width; x++) {
+      rowSum += input[srcRow + x - 1];
+      integral[intRow + x] = integral[prevRow + x] + rowSum;
+    }
+  }
+
+  const radius = Math.max(14, Math.min(42, Math.round(Math.min(width, height) / 45)));
+  const bias = 10;
+
+  for (let y = 0; y < height; y++) {
+    const y1 = Math.max(0, y - radius);
+    const y2 = Math.min(height - 1, y + radius);
+    for (let x = 0; x < width; x++) {
+      const x1 = Math.max(0, x - radius);
+      const x2 = Math.min(width - 1, x + radius);
+      const A = integral[y1 * integralW + x1];
+      const B = integral[y1 * integralW + (x2 + 1)];
+      const C = integral[(y2 + 1) * integralW + x1];
+      const D = integral[(y2 + 1) * integralW + (x2 + 1)];
+      const area = (x2 - x1 + 1) * (y2 - y1 + 1);
+      const mean = (D - B - C + A) / area;
+      const value = input[y * width + x];
+      out[y * width + x] = value < (mean - bias) ? 0 : 255;
+    }
+  }
+  return out;
+}
+
+function cleanOcrText(rawText) {
+  return String(rawText || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(line => line.replace(/[ \t]+/g, ' ').trim())
+    .filter((line, index, arr) => line || (index > 0 && arr[index - 1]))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function scoreReceiptOcrCandidate(textValue, confidence) {
+  const text = String(textValue || '');
+  if (!text) return 0;
+  const chars = (text.match(/[A-Za-z0-9]/g) || []).length;
+  const lines = text.split('\n').filter(Boolean).length;
+  const receiptWords = (text.match(/\b(total|subtotal|amount|due|cash|change|vat|sales|item|qty|receipt|invoice|tin|cashier)\b/gi) || []).length;
+  const moneyValues = findReceiptAmounts(text).length;
+  return (Number(confidence || 0) * 1.35) + Math.min(chars, 900) / 7 + Math.min(lines, 45) * 1.6 + receiptWords * 9 + moneyValues * 5;
+}
+
+function normalizeComparableOcrLine(line) {
+  return String(line || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .slice(0, 80);
+}
+
+function mergeImportantReceiptLines(primaryText, secondaryText) {
+  const primary = cleanOcrText(primaryText);
+  const secondary = cleanOcrText(secondaryText);
+  if (!primary) return secondary;
+  if (!secondary) return primary;
+
+  const primaryLines = primary.split('\n');
+  const normalized = new Set(primaryLines.map(normalizeComparableOcrLine).filter(Boolean));
+  const important = /(grand\s*total|total\s*due|amount\s*due|\btotal\b|subtotal|cash\b|change\b|vat\b|discount|date\b|\b20\d{2}[-/.]|\d{1,2}[-/.]\d{1,2}[-/.]20\d{2})/i;
+  const extras = [];
+
+  for (const line of secondary.split('\n')) {
+    const key = normalizeComparableOcrLine(line);
+    if (!key || normalized.has(key)) continue;
+    if (important.test(line)) {
+      extras.push(line);
+      normalized.add(key);
+    }
+  }
+
+  return extras.length ? `${primary}\n\n${extras.join('\n')}` : primary;
+}
+
+function titleCaseWords(value) {
+  return String(value || '').replace(/\b\w/g, ch => ch.toUpperCase());
+}
+
+function parsePhotoAsReceipt(textValue) {
+  const text = String(textValue || '');
+  const lines = text.split('\n').map(v => v.trim()).filter(Boolean);
+  if (!lines.length) return { isReceipt: false, merchant: '', date: '', total: 0, category: 'Other' };
+
+  const receiptSignals = /(total|subtotal|amount\s*due|vat|invoice|receipt|cash|change|tender|tax|qty|item|cashier|tin\b)/i.test(text);
+  const total = detectPhotoTotal(lines);
+  const date = detectPhotoDate(lines);
+  const merchant = detectPhotoMerchant(lines, text);
+  const category = guessPhotoCategory(text);
+  return { isReceipt: Boolean(receiptSignals || total), merchant, date, total, category };
+}
+
+function detectPhotoMerchant(lines, fullText = '') {
+  const t = String(fullText || '').toLowerCase();
+
+  // Common receipt/product clues can recover the merchant even when the header
+  // is cropped, faded or obscured by a finger.
+  if (/(jollibee|yumburger|burger\s*steak|jolly\s*spag|spag\s*mc|yum\s*wspag|icedtea\s*mc)/i.test(t)) return 'Jollibee';
+  if (/(mcdonald|mcdo\b|big\s*mac|mcchicken)/i.test(t)) return "McDonald's";
+  if (/(starbucks|frappuccino|caffe\s*latte)/i.test(t)) return 'Starbucks';
+  if (/(puregold)/i.test(t)) return 'Puregold';
+  if (/(savemore)/i.test(t)) return 'Savemore';
+  if (/(sm\s*supermarket)/i.test(t)) return 'SM Supermarket';
+
+  const skip = /(official receipt|sales invoice|invoice|receipt|vat|tin\b|address|tel\b|telephone|date\b|time\b|cashier|order\b|qty\b|subtotal|total|amount|change|cash\b|sales\b|item\b)/i;
+  const candidates = lines.filter(line => line.length >= 3 && line.length <= 58 && !skip.test(line) && !/^[-\d\s.,:/$₱P]+$/i.test(line));
+  return candidates[0] || '';
+}
+
+function normalizeReceiptAmountText(value) {
+  return String(value || '')
+    .replace(/[Oo](?=\d)/g, '0')
+    .replace(/(?<=\d)[Oo]/g, '0')
+    .replace(/[Il](?=\d)/g, '1')
+    .replace(/(?<=\d)[Il]/g, '1')
+    .replace(/₱/g, 'P')
+    .replace(/\bPHP\b/gi, 'P')
+    .replace(/(\d)\s*[.,]\s*(\d{2})\b/g, '$1.$2')
+    .replace(/P\s+(?=\d)/gi, 'P');
+}
+
+function findReceiptAmounts(textValue) {
+  const text = normalizeReceiptAmountText(textValue);
+  const values = [];
+  // Accepts: 524.00, P501.00, P 501.00, 1,234.56 and OCR-spaced decimals.
+  const re = /(?:\bP\s*)?((?:\d{1,3}(?:,\d{3})+)|\d+)\.(\d{2})\b/gi;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const value = Number(`${m[1].replace(/,/g, '')}.${m[2]}`);
+    if (Number.isFinite(value) && value > 0 && value < 100000000) values.push(value);
+  }
+  return values;
+}
+
+function detectPhotoTotal(lines) {
+  const candidates = [];
+  const labelWeights = [
+    [/grand\s*total|total\s*due|amount\s*due|amount\s*payable|net\s*total/i, 30],
+    [/\btotal\b/i, 18],
+    [/subtotal/i, 4],
+    [/cash\b|tender/i, -12],
+    [/change\b/i, -18],
+    [/discount|disc\b|less\b/i, -12],
+    [/vat\s*amount|vatable|vat[- ]?exempt|sales\b/i, -9]
+  ];
+
+  let cashValue = 0;
+  let changeValue = 0;
+
+  lines.forEach((originalLine, index) => {
+    const line = normalizeReceiptAmountText(originalLine);
+    let weight = 0;
+    for (const [pattern, score] of labelWeights) {
+      if (pattern.test(line)) weight += score;
+    }
+    const values = findReceiptAmounts(line);
+    values.forEach(value => candidates.push({ value, weight, index, line }));
+
+    // Many POS receipts expose the payable total indirectly as CASH - CHANGE.
+    // This is especially useful when the bold TOTAL DUE line is crumpled or faint.
+    if (/\bcash\b|tender/i.test(line) && !/cashier/i.test(line) && values.length) cashValue = values[values.length - 1];
+    if (/\bchange\b/i.test(line) && values.length) changeValue = values[values.length - 1];
+  });
+
+  if (!candidates.length && !(cashValue > changeValue && changeValue >= 0)) return 0;
+
+  candidates.sort((a, b) => {
+    if (b.weight !== a.weight) return b.weight - a.weight;
+    if (b.index !== a.index) return b.index - a.index;
+    return b.value - a.value;
+  });
+
+  const best = candidates[0];
+  const cashMinusChange = cashValue > 0 && changeValue >= 0 && cashValue > changeValue
+    ? Math.round((cashValue - changeValue) * 100) / 100
+    : 0;
+
+  if (cashMinusChange > 0) {
+    // If TOTAL was not recognized, use the arithmetic receipt check directly.
+    if (!best || best.weight <= 0) return cashMinusChange;
+
+    // A folded/bold total can OCR one digit incorrectly (e.g. 524 -> 824).
+    // CASH - CHANGE is a strong independent check, so prefer it when the printed
+    // total is materially inconsistent with the payment arithmetic.
+    const difference = Math.abs(best.value - cashMinusChange);
+    const tolerance = Math.max(1, cashMinusChange * 0.015);
+    if (difference > tolerance) return cashMinusChange;
+  }
+
+  if (best && best.weight > 0) return best.value;
+
+  const plausible = candidates.filter(c => c.value >= 10).sort((a, b) => b.value - a.value);
+  return plausible[0]?.value || best?.value || cashMinusChange || 0;
+}
+
+function normalizeReceiptDateText(value) {
+  return String(value || '')
+    .replace(/[Oo](?=\d)/g, '0')
+    .replace(/(?<=\d)[Oo]/g, '0')
+    .replace(/[Il](?=\d)/g, '1')
+    .replace(/(?<=\d)[Il]/g, '1')
+    .replace(/\s*([\/-])\s*/g, '$1');
+}
+
+function detectPhotoDate(lines) {
+  const patterns = [
+    /\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b/,
+    /\b(\d{1,2})[-/.](\d{1,2})[-/.](20\d{2})\b/,
+    /\b(\d{1,2})[-/.](\d{1,2})[-/.](\d{2})\b/
+  ];
+
+  for (const rawLine of lines) {
+    const line = normalizeReceiptDateText(rawLine);
+    let m = line.match(patterns[0]);
+    if (m) return normalizeYMD(Number(m[1]), Number(m[2]), Number(m[3]));
+
+    m = line.match(patterns[1]);
+    if (m) {
+      let a = Number(m[1]), b = Number(m[2]);
+      // PH receipts commonly use MM/DD/YYYY. If one side is >12, resolve it safely.
+      const month = a > 12 ? b : a;
+      const day = a > 12 ? a : b;
+      const normalized = normalizeYMD(Number(m[3]), month, day);
+      if (normalized) return normalized;
+    }
+
+    m = line.match(patterns[2]);
+    if (m) {
+      const year = 2000 + Number(m[3]);
+      let a = Number(m[1]), b = Number(m[2]);
+      const month = a > 12 ? b : a;
+      const day = a > 12 ? a : b;
+      const normalized = normalizeYMD(year, month, day);
+      if (normalized) return normalized;
+    }
+  }
+  return '';
+}
+
+function normalizeYMD(year, month, day) {
+  const d = new Date(year, month - 1, day);
+  if (d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return '';
+  return `${String(year).padStart(4,'0')}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+}
+
+function guessPhotoCategory(value) {
+  const t = String(value || '').toLowerCase();
+  if (/(restaurant|cafe|coffee|burger|chicken|pizza|food|meal|jollibee|mcdonald|starbucks|yumburger|burger\s*steak|spag)/.test(t)) return 'Food';
+  if (/(grocery|supermarket|market|puregold|savemore|waltermart|sm supermarket)/.test(t)) return 'Groceries';
+  if (/(gas|fuel|petron|shell|caltex|grab|taxi|transport|parking|toll)/.test(t)) return 'Transportation';
+  if (/(meralco|electric|water|internet|globe|smart|pldt|bill)/.test(t)) return 'Bills';
+  if (/(pharmacy|drug|medicine|hospital|clinic|health)/.test(t)) return 'Health';
+  if (/(cinema|movie|netflix|spotify|entertainment)/.test(t)) return 'Entertainment';
+  if (/(store|mall|department|uniqlo|shopee|lazada|shopping)/.test(t)) return 'Shopping';
   return 'Other';
 }
 
-function titleCase(value) {
-  return String(value || '').toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+function renderPhotoReceiptSummary(parsed) {
+  const summary = document.getElementById('receiptSummary');
+  if (!summary) return;
+  if (!parsed || !parsed.isReceipt) {
+    summary.hidden = true;
+    return;
+  }
+  summary.hidden = false;
+  text('photoMerchant', parsed.merchant || 'Not detected');
+  text('photoDate', parsed.date ? formatDate(parsed.date) : 'Not detected');
+  text('photoTotal', parsed.total ? peso(parsed.total) : 'Not detected');
+  text('photoCategory', parsed.category || 'Other');
 }
 
-function renderReceiptResult(data) {
-  text('receiptMerchant', data.merchant || 'Unknown merchant');
-  text('receiptDate', data.date ? formatDate(data.date) : 'Not detected');
-  text('receiptTotal', data.total ? peso(data.total) : 'Not detected');
-  text('receiptCategory', data.category || 'Other');
-  const raw = document.getElementById('receiptRawText');
-  if (raw) raw.textContent = data.rawText || '';
-  const items = document.getElementById('receiptItems');
-  if (items) {
-    items.innerHTML = data.itemLines && data.itemLines.length
-      ? data.itemLines.map(item => `<div class="receipt-item-line"><span>${escapeHtml(item.name)}</span><strong>${peso(item.amount)}</strong></div>`).join('')
-      : '<span>No individual purchase lines confidently detected.</span>';
+async function copyPhotoText() {
+  const output = document.getElementById('photoTextOutput');
+  const value = output ? output.value.trim() : '';
+  if (!value) {
+    showToast('No extracted text to copy.');
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(value);
+    showToast('Extracted text copied.');
+  } catch {
+    output.focus();
+    output.select();
+    document.execCommand('copy');
+    showToast('Extracted text copied.');
   }
 }
 
-function useReceiptInTracker() {
-  if (!receiptScanData || !receiptScanData.total) return;
-  const typeEl = document.getElementById('txType');
-  typeEl.value = 'expense';
+function usePhotoAsExpense() {
+  if (!photoScanData || !photoScanData.total) {
+    showToast('No receipt total was detected.');
+    return;
+  }
+  showPage('tracker');
+  document.getElementById('txType').value = 'expense';
   updateTransactionCategories();
-  document.getElementById('txAmount').value = receiptScanData.total;
-  document.getElementById('txCategory').value = EXPENSE_CATEGORIES.includes(receiptScanData.category) ? receiptScanData.category : 'Other';
-  document.getElementById('txDate').value = receiptScanData.date || todayISO();
-  const itemSummary = (receiptScanData.itemLines || []).slice(0, 4).map(i => i.name).join(', ');
-  document.getElementById('txNotes').value = [receiptScanData.merchant, itemSummary].filter(Boolean).join(' — ');
-  showToast('Receipt details copied to the Expense Tracker. Review, then Save Transaction.');
-  document.getElementById('txAmount').scrollIntoView({ behavior: 'smooth', block: 'center' });
+  document.getElementById('txAmount').value = photoScanData.total;
+  document.getElementById('txCategory').value = EXPENSE_CATEGORIES.includes(photoScanData.category) ? photoScanData.category : 'Other';
+  document.getElementById('txDate').value = photoScanData.date || todayISO();
+  document.getElementById('txNotes').value = [photoScanData.merchant, 'Imported from Photo → Text'].filter(Boolean).join(' — ');
+  showToast('Detected receipt details copied to Daily Tracker. Review before saving.', 3400);
 }
 
 /* ---------------- Events ---------------- */
@@ -1274,6 +1667,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.addEventListener('click', () => setMenuOpen(false));
   document.addEventListener('keydown', event => { if (event.key === 'Escape') setMenuOpen(false); });
 
+  document.getElementById('menuPhotoBtn').addEventListener('click', () => { setMenuOpen(false); showPage('photo'); });
   document.getElementById('menuRefreshBtn').addEventListener('click', refreshForLatestVersion);
   document.getElementById('menuEnableNotificationsBtn').addEventListener('click', async () => {
     setMenuOpen(false);
@@ -1285,12 +1679,13 @@ document.addEventListener('DOMContentLoaded', () => {
     await sendTestNotification();
   });
 
-  document.getElementById('scanReceiptCameraBtn').addEventListener('click', () => document.getElementById('receiptCameraInput').click());
-  document.getElementById('scanReceiptGalleryBtn').addEventListener('click', () => document.getElementById('receiptGalleryInput').click());
-  document.getElementById('receiptCameraInput').addEventListener('change', event => handleReceiptFile(event.target.files && event.target.files[0]));
-  document.getElementById('receiptGalleryInput').addEventListener('change', event => handleReceiptFile(event.target.files && event.target.files[0]));
-  document.getElementById('useReceiptBtn').addEventListener('click', useReceiptInTracker);
-  document.getElementById('clearReceiptBtn').addEventListener('click', resetReceiptScanner);
+  document.getElementById('photoCameraBtn').addEventListener('click', () => document.getElementById('photoCameraInput').click());
+  document.getElementById('photoGalleryBtn').addEventListener('click', () => document.getElementById('photoGalleryInput').click());
+  document.getElementById('photoCameraInput').addEventListener('change', event => handlePhotoFile(event.target.files && event.target.files[0]));
+  document.getElementById('photoGalleryInput').addEventListener('change', event => handlePhotoFile(event.target.files && event.target.files[0]));
+  document.getElementById('copyPhotoTextBtn').addEventListener('click', copyPhotoText);
+  document.getElementById('clearPhotoBtn').addEventListener('click', resetPhotoWorkspace);
+  document.getElementById('sendPhotoToExpenseBtn').addEventListener('click', usePhotoAsExpense);
 
   document.getElementById('installTopBtn').addEventListener('click', async () => {
     if (!deferredInstallPrompt) return;

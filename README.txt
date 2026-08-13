@@ -1,31 +1,22 @@
-PERA TRACKER V3 — UPDATE FILES
+PERA TRACKER V5
 
-WHAT CHANGED
-1. Hamburger menu at upper-left with:
-   - Refresh / Update App
-   - Enable Notifications
-   - Test Notification
-2. Notification controls removed from the Dashboard.
-3. Debt-payment consistency fix:
-   - Debt Payment removed from Daily Tracker.
-   - Record debt payments only from My Debts > Record Payment.
-   - That action reduces the debt balance and creates a linked payment history record.
-   - Linked debt-payment history cannot be deleted from Daily Tracker, preventing balance mismatches.
-   - Debt payments are kept separate from Actual Expenses and Top Spending Categories.
-4. Receipt Scanner added to Daily Tracker:
-   - Camera or photo upload.
-   - Client-side OCR using Tesseract.js.
-   - Extracts merchant, date, total, suggested category, and likely item lines.
-   - You review the detected information before it fills the expense form.
+OCR IMPROVEMENTS
+- Enhanced two-pass receipt OCR for thermal and dot-matrix receipts.
+- Small photos are automatically upscaled before recognition.
+- Auto-level grayscale and gentle sharpening improve faded print.
+- Adaptive local thresholding helps with shadows, creases, glare and uneven paper.
+- OCR uses both single-block and sparse-text passes and chooses the stronger result.
+- Receipt parsing now handles OCR-spaced amounts such as P501. 00 and prioritizes TOTAL DUE / AMOUNT DUE over CASH / CHANGE.
+- Added common receipt clues for merchant/category recovery when the receipt header is cropped or faint.
 
-HOW TO UPDATE GITHUB
-- Extract this ZIP.
-- Upload/replace ALL files and the icons folder in the root of your existing pera-tracker repository.
-- Commit to main.
-- Wait for GitHub Pages to deploy.
-- Open the app, tap the upper-left menu, then Refresh / Update App.
+UPDATE EXISTING GITHUB PAGES APP
+1. Extract this ZIP.
+2. Upload/replace all files in the existing pera-tracker repository root.
+3. Commit to main.
+4. Wait for GitHub Pages deployment.
+5. Open the site in Chrome with ?v=5 once, or use Menu > Refresh / Update App.
 
-RECEIPT SCANNER NOTE
-- OCR runs in the browser; no receipt image is intentionally uploaded by Pera Tracker to your own server.
-- The Tesseract.js OCR engine is loaded from its CDN, so internet access is needed when the OCR library/language data is first loaded.
-- OCR is not perfect. Always review the detected total/date/category before saving.
+NOTES
+- OCR still cannot recover text physically hidden by a finger, cut off from the photo, or completely blown out by glare.
+- Very blurry photos can still require a retake, but V5 should materially improve the sample receipt types that V4 struggled with.
+- Existing financial data remains in the same localStorage database key.
