@@ -36,7 +36,7 @@
             <strong>Pera Tracker</strong>
             <small>App controls</small>
           </div>
-          <span class="version-pill">v6</span>
+          <span class="version-pill">v7</span>
         </div>
         <button class="app-menu-item" id="menuPhotoBtn" type="button">
           <span class="menu-item-icon">▣</span>
@@ -254,6 +254,136 @@
         </section>
       </section>
 
+
+      <section id="credit" class="page">
+        <div class="hero-row">
+          <div>
+            <div class="eyebrow">REVOLVING CREDIT</div>
+            <h2>Credit</h2>
+          </div>
+        </div>
+
+        <div class="tracker-note">Use this for <strong>credit cards, Billease, Salmon, and other revolving/BNPL lines</strong>. Purchases count as expenses but do not reduce cash until you record the payment.</div>
+
+        <div class="summary-grid credit-summary-grid">
+          <article class="summary-card">
+            <div class="summary-label">Total Credit Limit</div>
+            <div class="summary-value" id="creditTotalLimit">₱0.00</div>
+            <div class="summary-foot" id="creditAccountCount">0 credit accounts</div>
+          </article>
+          <article class="summary-card primary-card">
+            <div class="summary-label">Outstanding</div>
+            <div class="summary-value" id="creditOutstanding">₱0.00</div>
+            <div class="summary-foot">Current amount used</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Available Credit</div>
+            <div class="summary-value" id="creditAvailable">₱0.00</div>
+            <div class="summary-foot">Limit less outstanding</div>
+          </article>
+          <article class="summary-card">
+            <div class="summary-label">Due Within 7 Days</div>
+            <div class="summary-value" id="creditDueSoon">₱0.00</div>
+            <div class="summary-foot" id="creditDueSoonCount">0 upcoming dues</div>
+          </article>
+        </div>
+
+        <div class="credit-layout">
+          <section class="panel form-panel">
+            <div class="panel-head">
+              <div><div class="eyebrow">ADD ACCOUNT</div><h3>Credit / BNPL Account</h3></div>
+            </div>
+            <div class="form-grid">
+              <div class="field">
+                <label for="creditProvider">Provider Type</label>
+                <select id="creditProvider">
+                  <option>Credit Card</option>
+                  <option>Billease</option>
+                  <option>Salmon</option>
+                  <option>Other Credit</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="creditName">Account Name</label>
+                <input id="creditName" type="text" placeholder="e.g. BPI Rewards / Billease" />
+              </div>
+              <div class="field">
+                <label for="creditLimit">Credit Limit</label>
+                <input id="creditLimit" inputmode="decimal" type="number" min="0" step="0.01" placeholder="0.00" />
+              </div>
+              <div class="field">
+                <label for="creditBalance">Current Outstanding</label>
+                <input id="creditBalance" inputmode="decimal" type="number" min="0" step="0.01" placeholder="0.00" />
+              </div>
+              <div class="field">
+                <label for="creditDueAmount">Current Amount Due</label>
+                <input id="creditDueAmount" inputmode="decimal" type="number" min="0" step="0.01" placeholder="0.00" />
+              </div>
+              <div class="field">
+                <label for="creditDueDate">Next Due Date</label>
+                <input id="creditDueDate" type="date" />
+              </div>
+              <div class="field">
+                <label for="creditReminder">Reminder</label>
+                <select id="creditReminder">
+                  <option value="7">7 days before</option>
+                  <option value="3" selected>3 days before</option>
+                  <option value="1">1 day before</option>
+                  <option value="0">On due date only</option>
+                </select>
+              </div>
+            </div>
+            <div class="form-actions"><button class="btn btn-dark" type="button" onclick="addCreditAccount()">Save Credit Account</button></div>
+          </section>
+
+          <section class="panel form-panel">
+            <div class="panel-head">
+              <div><div class="eyebrow">QUICK ACTIVITY</div><h3>Purchase or Payment</h3></div>
+            </div>
+            <div class="form-grid">
+              <div class="field full">
+                <label for="creditActivityAccount">Account</label>
+                <select id="creditActivityAccount"><option value="">Add an account first</option></select>
+              </div>
+              <div class="field">
+                <label for="creditActivityType">Activity</label>
+                <select id="creditActivityType">
+                  <option value="purchase">Purchase / Charge</option>
+                  <option value="payment">Payment</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="creditActivityAmount">Amount</label>
+                <input id="creditActivityAmount" inputmode="decimal" type="number" min="0" step="0.01" placeholder="0.00" />
+              </div>
+              <div class="field" id="creditActivityCategoryField">
+                <label for="creditActivityCategory">Expense Category</label>
+                <select id="creditActivityCategory">
+                  <option>Food</option><option>Bills</option><option>Transportation</option><option>Groceries</option>
+                  <option>Shopping</option><option>Health</option><option>Entertainment</option><option>Other</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="creditActivityDate">Date</label>
+                <input id="creditActivityDate" type="date" />
+              </div>
+              <div class="field full">
+                <label for="creditActivityDescription">Merchant / Description</label>
+                <textarea id="creditActivityDescription" placeholder="e.g. Grocery at SM / payment from BPI savings"></textarea>
+              </div>
+            </div>
+            <div class="form-actions"><button class="btn btn-dark" id="saveCreditActivityBtn" type="button">Save Activity</button></div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-head">
+            <div><div class="eyebrow">CREDIT ACCOUNTS</div><h3>Limits, Balances & Due Dates</h3></div>
+          </div>
+          <div id="creditList" class="credit-list"></div>
+        </section>
+      </section>
+
       <section id="calendar" class="page">
         <div class="hero-row calendar-hero">
           <div>
@@ -350,7 +480,7 @@
                     <div class="eyebrow">DETECTED DETAILS</div>
                     <h3 id="photoSummaryTitle">Possible financial transaction</h3>
                   </div>
-                  <button class="btn btn-dark" id="sendPhotoToExpenseBtn" type="button">Use as Expense</button>
+                  <button class="btn btn-dark" id="sendPhotoToExpenseBtn" type="button">Send to Daily Expense</button>
                 </div>
                 <div class="receipt-summary-grid">
                   <div><span>Source / Merchant</span><strong id="photoMerchant">—</strong></div>
@@ -358,6 +488,7 @@
                   <div><span>Amount</span><strong id="photoTotal">—</strong></div>
                   <div><span>Reference</span><strong id="photoReference">—</strong></div>
                   <div><span>Category</span><strong id="photoCategory">—</strong></div>
+                  <div class="photo-description-field"><span>Description</span><strong id="photoDescription">—</strong></div>
                 </div>
               </div>
             </div>
@@ -383,7 +514,7 @@
             <div class="summary-value" id="reportExpenses">₱0.00</div>
           </article>
           <article class="summary-card">
-            <div class="summary-label">Debt Payments</div>
+            <div class="summary-label">Debt/Credit Payments</div>
             <div class="summary-value" id="reportDebtPayments">₱0.00</div>
           </article>
           <article class="summary-card">
@@ -435,6 +566,9 @@
       </button>
       <button class="nav-btn" data-page="debts" type="button" onclick="showPage('debts', this)">
         <span class="nav-icon">₱</span><span>Debts</span>
+      </button>
+      <button class="nav-btn" data-page="credit" type="button" onclick="showPage('credit', this)">
+        <span class="nav-icon">▤</span><span>Credit</span>
       </button>
       <button class="nav-btn" data-page="calendar" type="button" onclick="showPage('calendar', this)">
         <span class="nav-icon">▦</span><span>Calendar</span>

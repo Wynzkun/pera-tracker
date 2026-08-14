@@ -17,6 +17,7 @@ const chartPalette = [
 
 const EXPENSE_CATEGORIES = ['Food', 'Bills', 'Transportation', 'Groceries', 'Shopping', 'Health', 'Entertainment', 'Other'];
 const INCOME_CATEGORIES = ['Paycheck', 'Business', 'Side Hustle', 'Other Income'];
+const CREDIT_PROVIDERS = ['Credit Card', 'Billease', 'Salmon', 'Other Credit'];
 let photoScanData = null;
 let currentPhotoObjectUrl = null;
 let toastTimer = null;
@@ -26,7 +27,7 @@ let calendarCursor = startOfMonth(new Date());
 let selectedCalendarDate = todayISO();
 
 function freshState() {
-  return { transactions: [], debts: [] };
+  return { transactions: [], debts: [], creditAccounts: [] };
 }
 
 function loadState() {
@@ -45,6 +46,10 @@ function loadState() {
 }
 
 let state = loadState();
+const debtTrackingMigrated = migrateDebtTrackingState(state);
+if (debtTrackingMigrated) {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+}
 
 function safeParse(value) {
   if (!value) return null;
@@ -55,12 +60,13 @@ function normalizeState(raw) {
   return {
     transactions: Array.isArray(raw.transactions) ? raw.transactions.map(t => ({
       id: t.id || uid(),
-      type: ['expense', 'income', 'debt-payment'].includes(t.type) ? t.type : 'expense',
+      type: ['expense', 'income', 'debt-payment', 'credit-purchase', 'credit-payment'].includes(t.type) ? t.type : 'expense',
       amount: Number(t.amount || 0),
       category: t.category || 'Other',
       date: t.date || todayISO(),
       notes: t.notes || '',
-      debtId: t.debtId || null
+      debtId: t.debtId || null,
+      creditId: t.creditId || null
     })) : [],
     debts: Array.isArray(raw.debts) ? raw.debts.map(d => ({
       id: d.id || uid(),
@@ -69,9 +75,91 @@ function normalizeState(raw) {
       balance: Number(d.balance || 0),
       dueAmount: Number(d.dueAmount || 0),
       dueDate: d.dueDate || todayISO(),
-      reminderDays: Number.isFinite(Number(d.reminderDays)) ? Number(d.reminderDays) : 3
+      reminderDays: Number.isFinite(Number(d.reminderDays)) ? Number(d.reminderDays) : 3,
+      dueCycleKey: d.dueCycleKey || null,
+      duePaidAmount: Number.isFinite(Number(d.duePaidAmount)) ? Number(d.duePaidAmount) : null
+    })) : [],
+    creditAccounts: Array.isArray(raw.creditAccounts) ? raw.creditAccounts.map(c => ({
+      id: c.id || uid(),
+      provider: CREDIT_PROVIDERS.includes(c.provider) ? c.provider : 'Other Credit',
+      name: c.name || c.provider || 'Credit Account',
+      limit: Number(c.limit || 0),
+      balance: Number(c.balance || 0),
+      dueAmount: Number(c.dueAmount || 0),
+      dueDate: c.dueDate || todayISO(),
+      reminderDays: Number.isFinite(Number(c.reminderDays)) ? Number(c.reminderDays) : 3
     })) : []
   };
+}
+
+
+function migrateDebtTrackingState(targetState) {
+  let changed = false;
+  const tx = Array.isArray(targetState.transactions) ? targetState.transactions : [];
+
+  (targetState.debts || []).forEach(debt => {
+    const hasCurrentCycle = debt.dueCycleKey === debt.dueDate && Number.isFinite(Number(debt.duePaidAmount));
+
+    if (!hasCurrentCycle) {
+      const dueDate = parseISO(debt.dueDate);
+      const windowStart = new Date(dueDate);
+      windowStart.setDate(windowStart.getDate() - 14);
+      const today = parseISO(todayISO());
+
+      const inferred = sum(tx.filter(t => {
+        if (t.type !== 'debt-payment' || t.debtId !== debt.id || !t.date) return false;
+        const paidDate = parseISO(t.date);
+        return paidDate >= windowStart && paidDate <= today;
+      }).map(t => t.amount));
+
+      debt.dueCycleKey = debt.dueDate;
+      debt.duePaidAmount = inferred;
+      changed = true;
+    }
+  });
+
+  return changed;
+}
+
+function getDebtDueInfo(debt) {
+  const paidTowardDue = debt.dueCycleKey === debt.dueDate
+    ? Math.max(0, Number(debt.duePaidAmount || 0))
+    : 0;
+
+  const minimumDue = Math.max(0, Number(debt.dueAmount || 0));
+  const remainingDue = debt.balance <= 0
+    ? 0
+    : Math.max(0, Math.min(Number(debt.balance || 0), minimumDue - paidTowardDue));
+
+  return {
+    minimumDue,
+    paidTowardDue,
+    remainingDue,
+    minimumPaid: debt.balance <= 0 || (minimumDue > 0 && paidTowardDue + 0.005 >= minimumDue)
+  };
+}
+
+function getDebtProgress(debt) {
+  const linkedPaid = sum(state.transactions.filter(t =>
+    t.type === 'debt-payment' && t.debtId === debt.id
+  ).map(t => t.amount));
+
+  // If some payments happened before this app started tracking linked payments,
+  // infer them only when Original Amount is still higher than balance + tracked payments.
+  const inferredOlderPaid = Math.max(
+    0,
+    Number(debt.original || 0) - (Number(debt.balance || 0) + linkedPaid)
+  );
+
+  const effectivePaid = linkedPaid + inferredOlderPaid;
+  const totalBasis = Number(debt.balance || 0) + effectivePaid;
+  const percent = Number(debt.balance || 0) <= 0
+    ? 100
+    : totalBasis > 0
+      ? Math.min(100, Math.max(0, (effectivePaid / totalBasis) * 100))
+      : 0;
+
+  return { linkedPaid, inferredOlderPaid, effectivePaid, totalBasis, percent };
 }
 
 function uid() {
@@ -192,7 +280,15 @@ function addDebt() {
   }
 
   state.debts.unshift({
-    id: uid(), name, original, balance, dueAmount, dueDate, reminderDays
+    id: uid(),
+    name,
+    original,
+    balance,
+    dueAmount,
+    dueDate,
+    reminderDays,
+    dueCycleKey: dueDate,
+    duePaidAmount: 0
   });
 
   ['debtName', 'debtOriginal', 'debtBalance', 'debtDueAmount', 'debtDueDate']
@@ -226,7 +322,10 @@ function editDueDate(id) {
     return;
   }
   debt.dueDate = next;
+  debt.dueCycleKey = next;
+  debt.duePaidAmount = 0;
   saveState();
+  showToast(`Next due date updated for ${debt.name}.`);
 }
 window.editDueDate = editDueDate;
 
@@ -243,8 +342,16 @@ function recordPayment(id) {
     return;
   }
 
+  const dueBeforePayment = getDebtDueInfo(debt);
   const applied = Math.min(amount, debt.balance);
+
+  if (debt.dueCycleKey !== debt.dueDate) {
+    debt.dueCycleKey = debt.dueDate;
+    debt.duePaidAmount = 0;
+  }
+
   debt.balance = Math.max(0, debt.balance - applied);
+  debt.duePaidAmount = Math.max(0, Number(debt.duePaidAmount || 0)) + applied;
 
   state.transactions.unshift({
     id: uid(),
@@ -257,11 +364,177 @@ function recordPayment(id) {
   });
 
   saveState();
+
+  const dueAfterPayment = getDebtDueInfo(debt);
+  if (!dueBeforePayment.minimumPaid && dueAfterPayment.minimumPaid && debt.balance > 0) {
+    showToast(`Minimum amount due paid for ${debt.name}.`);
+  } else if (debt.balance <= 0) {
+    showToast(`${debt.name} is fully paid.`);
+  } else {
+    showToast(`${peso(applied)} payment recorded for ${debt.name}.`);
+  }
 }
 window.recordPayment = recordPayment;
 
+function addCreditAccount() {
+  const provider = document.getElementById('creditProvider').value;
+  const name = document.getElementById('creditName').value.trim();
+  const limit = Number(document.getElementById('creditLimit').value || 0);
+  const balance = Number(document.getElementById('creditBalance').value || 0);
+  const dueAmount = Number(document.getElementById('creditDueAmount').value || 0);
+  const dueDate = document.getElementById('creditDueDate').value;
+  const reminderDays = Number(document.getElementById('creditReminder').value);
+  if (!name || limit < 0 || balance < 0 || dueAmount < 0 || !dueDate) {
+    alert('Please enter the account name, valid amounts, and next due date.');
+    return;
+  }
+  state.creditAccounts.unshift({ id: uid(), provider, name, limit, balance, dueAmount, dueDate, reminderDays });
+  ['creditName','creditLimit','creditBalance','creditDueAmount','creditDueDate'].forEach(id => document.getElementById(id).value = '');
+  saveState();
+  showToast(`${name} added to Credit.`);
+}
+window.addCreditAccount = addCreditAccount;
+
+function saveCreditActivity() {
+  const creditId = document.getElementById('creditActivityAccount').value;
+  const account = state.creditAccounts.find(c => c.id === creditId);
+  const activity = document.getElementById('creditActivityType').value;
+  const amount = Number(document.getElementById('creditActivityAmount').value);
+  const date = document.getElementById('creditActivityDate').value;
+  const category = document.getElementById('creditActivityCategory').value;
+  const description = document.getElementById('creditActivityDescription').value.trim();
+  if (!account) { alert('Please select a credit account.'); return; }
+  if (!amount || amount <= 0 || !date) { alert('Please enter a valid amount and date.'); return; }
+
+  if (activity === 'purchase') {
+    account.balance += amount;
+    state.transactions.unshift({
+      id: uid(), type: 'credit-purchase', amount, category: EXPENSE_CATEGORIES.includes(category) ? category : 'Other',
+      date, notes: description || `Charge to ${account.name}`, debtId: null, creditId: account.id
+    });
+    if (account.limit > 0 && account.balance > account.limit) showToast(`${account.name} is now above its recorded credit limit.`, 3800);
+    else showToast(`Purchase added to ${account.name}.`);
+  } else {
+    const applied = Math.min(amount, account.balance);
+    account.balance = Math.max(0, account.balance - applied);
+    account.dueAmount = Math.max(0, account.dueAmount - applied);
+    state.transactions.unshift({
+      id: uid(), type: 'credit-payment', amount: applied, category: 'Credit Payment', date,
+      notes: description || `Payment for ${account.name}`, debtId: null, creditId: account.id
+    });
+    showToast(`Payment recorded for ${account.name}.`);
+  }
+  document.getElementById('creditActivityAmount').value = '';
+  document.getElementById('creditActivityDescription').value = '';
+  saveState();
+}
+
+function quickCreditActivity(id, type) {
+  showPage('credit');
+  document.getElementById('creditActivityAccount').value = id;
+  document.getElementById('creditActivityType').value = type;
+  updateCreditActivityForm();
+  document.getElementById('creditActivityAmount').focus();
+}
+window.quickCreditActivity = quickCreditActivity;
+
+function updateCreditDue(id) {
+  const account = state.creditAccounts.find(c => c.id === id);
+  if (!account) return;
+  const amountRaw = prompt(`Current amount due for ${account.name}:`, account.dueAmount || 0);
+  if (amountRaw === null) return;
+  const amount = Number(amountRaw);
+  if (!Number.isFinite(amount) || amount < 0) { alert('Invalid amount due.'); return; }
+  const dateRaw = prompt(`Next due date for ${account.name} (YYYY-MM-DD):`, account.dueDate);
+  if (dateRaw === null) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateRaw) || Number.isNaN(parseISO(dateRaw).getTime())) { alert('Please use YYYY-MM-DD.'); return; }
+  account.dueAmount = amount;
+  account.dueDate = dateRaw;
+  saveState();
+}
+window.updateCreditDue = updateCreditDue;
+
+function deleteCreditAccount(id) {
+  const account = state.creditAccounts.find(c => c.id === id);
+  if (!account) return;
+  if (!confirm(`Delete ${account.name}? Existing transaction history will stay in the tracker.`)) return;
+  state.creditAccounts = state.creditAccounts.filter(c => c.id !== id);
+  saveState();
+}
+window.deleteCreditAccount = deleteCreditAccount;
+
+function creditStatus(account) {
+  if (account.balance <= 0) return { text:'CLEAR', cls:'status-paid' };
+  const days = daysUntil(account.dueDate);
+  if (days < 0 && account.dueAmount > 0) return { text:'OVERDUE', cls:'status-overdue' };
+  if (days === 0 && account.dueAmount > 0) return { text:'DUE TODAY', cls:'status-today' };
+  if (days <= 7 && days > 0 && account.dueAmount > 0) return { text:`DUE IN ${days} DAY${days===1?'':'S'}`, cls:'status-soon' };
+  return { text: formatDate(account.dueDate,{month:'short',day:'numeric'}).toUpperCase(), cls:'status-future' };
+}
+
+function updateCreditActivityForm() {
+  const type = document.getElementById('creditActivityType')?.value;
+  const field = document.getElementById('creditActivityCategoryField');
+  if (field) field.style.display = type === 'payment' ? 'none' : '';
+}
+
+function renderCredits() {
+  const accounts = state.creditAccounts || [];
+  const totalLimit = sum(accounts.map(c => c.limit));
+  const outstanding = sum(accounts.map(c => c.balance));
+  const available = sum(accounts.map(c => c.limit > 0 ? Math.max(0, c.limit - c.balance) : 0));
+  const dueSoon = accounts.filter(c => c.dueAmount > 0 && c.balance > 0 && daysUntil(c.dueDate) >= 0 && daysUntil(c.dueDate) <= 7);
+  text('creditTotalLimit', peso(totalLimit));
+  text('creditOutstanding', peso(outstanding));
+  text('creditAvailable', peso(available));
+  text('creditDueSoon', peso(sum(dueSoon.map(c => Math.min(c.dueAmount,c.balance)))));
+  text('creditAccountCount', `${accounts.length} credit account${accounts.length===1?'':'s'}`);
+  text('creditDueSoonCount', `${dueSoon.length} upcoming due${dueSoon.length===1?'':'s'}`);
+
+  const select = document.getElementById('creditActivityAccount');
+  if (select) {
+    const current=select.value;
+    select.innerHTML = accounts.length ? accounts.map(c => `<option value="${c.id}">${escapeHtml(c.name)} · ${escapeHtml(c.provider)}</option>`).join('') : '<option value="">Add an account first</option>';
+    if (accounts.some(c=>c.id===current)) select.value=current;
+  }
+
+  const list=document.getElementById('creditList');
+  if (!list) return;
+  if (!accounts.length) { list.innerHTML='<div class="empty credit-empty">No credit accounts yet. Add your credit card, Billease, Salmon, or other line above.</div>'; return; }
+  list.innerHTML=accounts.map(c=>{
+    const availableAmount=c.limit>0?c.limit-c.balance:0;
+    const usage=c.limit>0?(c.balance/c.limit*100):0;
+    const status=creditStatus(c);
+    return `<article class="credit-account-card">
+      <div class="credit-account-top"><div><span class="credit-provider">${escapeHtml(c.provider)}</span><div class="credit-account-name">${escapeHtml(c.name)}</div><span class="status ${status.cls}">${status.text}</span></div>
+      <div class="credit-account-balance">${peso(c.balance)}<small>outstanding</small></div></div>
+      <div class="credit-usage ${usage>100?'over':''}"><div style="width:${Math.min(100,Math.max(0,usage))}%"></div></div>
+      <div class="credit-metrics">
+        <div class="credit-metric"><span>Limit</span><strong>${c.limit>0?peso(c.limit):'Not set'}</strong></div>
+        <div class="credit-metric"><span>Available</span><strong>${c.limit>0?peso(availableAmount):'—'}</strong></div>
+        <div class="credit-metric"><span>Amount Due</span><strong>${peso(Math.min(c.dueAmount,c.balance))}</strong></div>
+        <div class="credit-metric"><span>Due Date</span><strong>${formatDate(c.dueDate,{month:'short',day:'numeric'})}</strong></div>
+        <div class="credit-metric"><span>Usage</span><strong>${c.limit>0?`${usage.toFixed(0)}%`:'—'}</strong></div>
+        <div class="credit-metric"><span>Reminder</span><strong>${c.reminderDays} day${c.reminderDays===1?'':'s'} before</strong></div>
+      </div>
+      <div class="credit-actions">
+        <button class="mini-btn" onclick="quickCreditActivity('${c.id}','purchase')">+ Purchase</button>
+        <button class="mini-btn" onclick="quickCreditActivity('${c.id}','payment')">Record Payment</button>
+        <button class="mini-btn" onclick="updateCreditDue('${c.id}')">Update Due</button>
+        <button class="mini-btn" onclick="deleteCreditAccount('${c.id}')">Delete</button>
+      </div>
+    </article>`;
+  }).join('');
+}
+
 function debtStatus(debt) {
-  if (debt.balance <= 0) return { text: 'PAID', cls: 'status-paid' };
+  if (debt.balance <= 0) return { text: 'FULLY PAID', cls: 'status-paid' };
+
+  const dueInfo = getDebtDueInfo(debt);
+  if (dueInfo.minimumPaid) {
+    return { text: 'MINIMUM DUE PAID', cls: 'status-minpaid' };
+  }
+
   const days = daysUntil(debt.dueDate);
   if (days < 0) return { text: 'OVERDUE', cls: 'status-overdue' };
   if (days === 0) return { text: 'DUE TODAY', cls: 'status-today' };
@@ -272,67 +545,77 @@ function debtStatus(debt) {
 function renderDashboard() {
   const tx = state.transactions;
   const debts = state.debts;
+  const creditAccounts = state.creditAccounts || [];
   const income = sum(tx.filter(t => t.type === 'income').map(t => t.amount));
-  const cashOut = sum(tx.filter(t => t.type !== 'income').map(t => t.amount));
+  const cashOut = sum(tx.filter(t => ['expense','debt-payment','credit-payment'].includes(t.type)).map(t => t.amount));
   const available = income - cashOut;
 
   const now = new Date();
   const monthlyExpenses = sum(tx.filter(t => {
     const d = parseISO(t.date);
-    return t.type === 'expense' &&
-      d.getMonth() === now.getMonth() &&
-      d.getFullYear() === now.getFullYear();
+    return ['expense','credit-purchase'].includes(t.type) && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   }).map(t => t.amount));
 
   const activeDebts = debts.filter(d => d.balance > 0);
-  const totalDebt = sum(activeDebts.map(d => d.balance));
-  const dueSoon = activeDebts.filter(d => {
+  const activeCredits = creditAccounts.filter(c => c.balance > 0);
+  const totalDebt = sum(activeDebts.map(d => d.balance)) + sum(activeCredits.map(c => c.balance));
+  const debtDueSoon = activeDebts.filter(d => {
     const days = daysUntil(d.dueDate);
-    return days >= 0 && days <= 7;
+    const dueInfo = getDebtDueInfo(d);
+    return days >= 0 && days <= 7 && !dueInfo.minimumPaid && dueInfo.remainingDue > 0;
   });
-  const dueSoonTotal = sum(dueSoon.map(d => Math.min(d.dueAmount, d.balance)));
+  const creditDueSoon = activeCredits.filter(c => c.dueAmount>0 && daysUntil(c.dueDate)>=0 && daysUntil(c.dueDate)<=7);
+  const dueSoonTotal = sum(debtDueSoon.map(d => getDebtDueInfo(d).remainingDue)) + sum(creditDueSoon.map(c => Math.min(c.dueAmount,c.balance)));
 
   text('availableCash', peso(available));
   text('monthlyExpenses', peso(monthlyExpenses));
   text('totalDebt', peso(totalDebt));
   text('dueSoonTotal', peso(dueSoonTotal));
-  text('debtCount', `${activeDebts.length} active debt${activeDebts.length === 1 ? '' : 's'}`);
-  text('dueSoonCount', `${dueSoon.length} upcoming due${dueSoon.length === 1 ? '' : 's'}`);
+  text('debtCount', `${activeDebts.length} debt${activeDebts.length===1?'':'s'} + ${activeCredits.length} credit account${activeCredits.length===1?'':'s'}`);
+  text('dueSoonCount', `${debtDueSoon.length + creditDueSoon.length} upcoming due${debtDueSoon.length + creditDueSoon.length===1?'':'s'}`);
   text('monthLabel', now.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' }));
 
-  const upcoming = [...activeDebts]
-    .sort((a, b) => parseISO(a.dueDate) - parseISO(b.dueDate))
-    .slice(0, 6);
+  const upcoming = [
+    ...activeDebts
+      .filter(d => !getDebtDueInfo(d).minimumPaid && getDebtDueInfo(d).remainingDue > 0)
+      .map(d => ({
+        kind:'debt',
+        name:d.name,
+        balance:d.balance,
+        dueAmount:getDebtDueInfo(d).remainingDue,
+        dueDate:d.dueDate,
+        status:debtStatus(d)
+      })),
+    ...activeCredits.filter(c=>c.dueAmount>0).map(c => ({kind:'credit', name:c.name, balance:c.balance, dueAmount:c.dueAmount, dueDate:c.dueDate, status:creditStatus(c)}))
+  ].sort((a,b)=>parseISO(a.dueDate)-parseISO(b.dueDate)).slice(0,6);
+  document.getElementById('upcomingDues').innerHTML = upcoming.length ? upcoming.map(item => `
+    <div class="list-item"><div class="item-left"><div class="item-title">${escapeHtml(item.name)}</div><div class="item-sub">${item.kind==='credit'?'Credit':'Debt'} • Due ${formatDate(item.dueDate)} • Balance ${peso(item.balance)}</div><span class="status ${item.status.cls}">${item.status.text}</span></div><div class="item-amount">${peso(Math.min(item.dueAmount,item.balance))}</div></div>`).join('') : emptyHtml('No unpaid dues within the current cycle.');
 
-  document.getElementById('upcomingDues').innerHTML = upcoming.length
-    ? upcoming.map(debtListRow).join('')
-    : emptyHtml('No upcoming dues yet.');
-
-  document.getElementById('recentTransactions').innerHTML = tx.length
-    ? tx.slice(0, 6).map(transactionRow).join('')
-    : emptyHtml('No transactions yet.');
+  document.getElementById('recentTransactions').innerHTML = tx.length ? tx.slice(0,6).map(transactionRow).join('') : emptyHtml('No transactions yet.');
 }
 
 function transactionRow(t, withDelete = false) {
   const isIncome = t.type === 'income';
+  const isCreditPurchase = t.type === 'credit-purchase';
+  const labels = { expense:'Expense', income:'Income', 'debt-payment':'Debt Payment', 'credit-purchase':'Credit Purchase', 'credit-payment':'Credit Payment' };
   const sign = isIncome ? '+' : '-';
+  const linkedManaged = Boolean(t.debtId || t.creditId);
   return `
     <div class="list-item">
       <div class="item-left">
         <div class="item-title">${escapeHtml(t.category)}</div>
-        <div class="item-sub">${formatDate(t.date)}${t.notes ? ` • ${escapeHtml(t.notes)}` : ''}</div>
+        <div class="item-sub">${labels[t.type] || t.type} • ${formatDate(t.date)}${t.notes ? ` • ${escapeHtml(t.notes)}` : ''}${isCreditPurchase ? ' • charged to credit' : ''}</div>
       </div>
       <div>
         <div class="item-amount ${isIncome ? 'amount-income' : 'amount-out'}">${sign}${peso(t.amount)}</div>
-        ${withDelete ? (t.type === 'debt-payment' && t.debtId
-          ? `<div class="item-actions"><span class="item-sub">Managed in Debts</span></div>`
-          : `<div class="item-actions"><button class="mini-btn" onclick="deleteTransaction('${t.id}')">Delete</button></div>`) : ''}
+        ${withDelete ? (linkedManaged ? `<div class="item-actions"><span class="item-sub">Managed in ${t.creditId?'Credit':'Debts'}</span></div>` : `<div class="item-actions"><button class="mini-btn" onclick="deleteTransaction('${t.id}')">Delete</button></div>`) : ''}
       </div>
     </div>`;
 }
 
 function debtListRow(d) {
   const status = debtStatus(d);
+  const dueInfo = getDebtDueInfo(d);
   return `
     <div class="list-item">
       <div class="item-left">
@@ -340,7 +623,7 @@ function debtListRow(d) {
         <div class="item-sub">Due ${formatDate(d.dueDate)} • Balance ${peso(d.balance)}</div>
         <span class="status ${status.cls}">${status.text}</span>
       </div>
-      <div class="item-amount">${peso(Math.min(d.dueAmount, d.balance))}</div>
+      <div class="item-amount">${peso(dueInfo.remainingDue)}</div>
     </div>`;
 }
 
@@ -359,9 +642,9 @@ function renderDebts() {
 
   el.innerHTML = state.debts.map(d => {
     const status = debtStatus(d);
-    const paidPercent = d.original > 0
-      ? Math.min(100, Math.max(0, ((d.original - d.balance) / d.original) * 100))
-      : 0;
+    const progress = getDebtProgress(d);
+    const dueInfo = getDebtDueInfo(d);
+    const percentLabel = `${progress.percent.toFixed(progress.percent < 10 && progress.percent > 0 ? 1 : 0)}%`;
 
     return `
       <div class="list-item debt-card">
@@ -374,9 +657,22 @@ function renderDebts() {
             </div>
             <span class="status ${status.cls}">${status.text}</span>
           </div>
-          <div class="item-amount">${peso(Math.min(d.dueAmount, d.balance))}</div>
+          <div class="item-amount">${dueInfo.minimumPaid ? '₱0.00 due' : `${peso(dueInfo.remainingDue)} due`}</div>
         </div>
-        <div class="debt-progress"><div style="width:${paidPercent}%"></div></div>
+
+        <div class="debt-due-summary">
+          <span>Minimum due ${peso(dueInfo.minimumDue)}</span>
+          <span>Paid this cycle ${peso(Math.min(dueInfo.paidTowardDue, dueInfo.minimumDue || dueInfo.paidTowardDue))}</span>
+        </div>
+
+        <div class="debt-progress-meta">
+          <span>Overall payment progress</span>
+          <strong>${percentLabel}</strong>
+        </div>
+        <div class="debt-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress.percent.toFixed(1)}">
+          <div style="width:${progress.percent}%"></div>
+        </div>
+
         <div class="item-actions">
           ${d.balance > 0 ? `<button class="mini-btn" onclick="recordPayment('${d.id}')">Record Payment</button>` : ''}
           <button class="mini-btn" onclick="editDueDate('${d.id}')">Edit Due Date</button>
@@ -388,30 +684,18 @@ function renderDebts() {
 
 function renderReports() {
   const income = sum(state.transactions.filter(t => t.type === 'income').map(t => t.amount));
-  const expenses = sum(state.transactions.filter(t => t.type === 'expense').map(t => t.amount));
-  const debtPayments = sum(state.transactions.filter(t => t.type === 'debt-payment').map(t => t.amount));
-  const net = income - expenses - debtPayments;
+  const expenses = sum(state.transactions.filter(t => ['expense','credit-purchase'].includes(t.type)).map(t => t.amount));
+  const payments = sum(state.transactions.filter(t => ['debt-payment','credit-payment'].includes(t.type)).map(t => t.amount));
+  const cashNet = income - sum(state.transactions.filter(t => ['expense','debt-payment','credit-payment'].includes(t.type)).map(t => t.amount));
 
   text('reportIncome', peso(income));
   text('reportExpenses', peso(expenses));
-  text('reportDebtPayments', peso(debtPayments));
-  text('reportNet', peso(net));
+  text('reportDebtPayments', peso(payments));
+  text('reportNet', peso(cashNet));
 
-  const breakdown = aggregate(
-    state.transactions.filter(t => t.type === 'expense'),
-    t => t.category,
-    t => t.amount
-  );
-
-  const rows = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
-  document.getElementById('expenseBreakdown').innerHTML = rows.length
-    ? rows.map(([cat, amount]) => `
-        <div class="list-item">
-          <div class="item-title">${escapeHtml(cat)}</div>
-          <div class="item-amount">${peso(amount)}</div>
-        </div>`).join('')
-    : emptyHtml('No expense data yet.');
-
+  const breakdown = aggregate(state.transactions.filter(t => ['expense','credit-purchase'].includes(t.type)), t => t.category, t => t.amount);
+  const rows = Object.entries(breakdown).sort((a,b)=>b[1]-a[1]);
+  document.getElementById('expenseBreakdown').innerHTML = rows.length ? rows.map(([cat,amount]) => `<div class="list-item"><div class="item-title">${escapeHtml(cat)}</div><div class="item-amount">${peso(amount)}</div></div>`).join('') : emptyHtml('No expense data yet.');
   renderCharts();
 }
 
@@ -419,6 +703,7 @@ function renderAll() {
   renderDashboard();
   renderTransactions();
   renderDebts();
+  renderCredits();
   renderReports();
   renderCalendar();
   renderNotificationStatus();
@@ -452,83 +737,36 @@ function renderCalendar() {
   const title = document.getElementById('calendarMonthTitle');
   const grid = document.getElementById('calendarGrid');
   if (!title || !grid) return;
-
-  title.textContent = calendarCursor.toLocaleDateString('en-PH', { month: 'long', year: 'numeric' });
-
-  const year = calendarCursor.getFullYear();
-  const month = calendarCursor.getMonth();
-  const first = new Date(year, month, 1);
-  const gridStart = new Date(year, month, 1 - first.getDay());
-
-  const html = [];
-  for (let i = 0; i < 42; i++) {
-    const date = new Date(gridStart);
-    date.setDate(gridStart.getDate() + i);
-    const iso = isoLocal(date);
-    const inMonth = date.getMonth() === month;
-    const dues = state.debts.filter(d => d.balance > 0 && d.dueDate === iso);
-    const tx = state.transactions.filter(t => t.date === iso);
-    const events = [
-      ...dues.map(d => ({ label: d.name, cls: '' })),
-      ...tx.slice(0, 2).map(t => ({ label: t.category, cls: 'tx' }))
-    ];
-    const visible = events.slice(0, 3);
-    const extra = Math.max(0, events.length - visible.length);
-
-    html.push(`
-      <button class="calendar-day ${inMonth ? '' : 'outside'} ${iso === todayISO() ? 'today' : ''} ${iso === selectedCalendarDate ? 'selected' : ''}"
-              type="button" data-date="${iso}">
-        <span class="calendar-number">${date.getDate()}</span>
-        <span class="calendar-events">
-          ${visible.map(e => `<span class="calendar-event ${e.cls}">${escapeHtml(e.label)}</span>`).join('')}
-          ${extra ? `<span class="calendar-more">+${extra} more</span>` : ''}
-        </span>
-      </button>`);
+  title.textContent = calendarCursor.toLocaleDateString('en-PH', { month:'long', year:'numeric' });
+  const year=calendarCursor.getFullYear(), month=calendarCursor.getMonth();
+  const first=new Date(year,month,1); const gridStart=new Date(year,month,1-first.getDay());
+  const html=[];
+  for(let i=0;i<42;i++){
+    const date=new Date(gridStart); date.setDate(gridStart.getDate()+i); const iso=isoLocal(date); const inMonth=date.getMonth()===month;
+    const dues=state.debts.filter(d=>d.balance>0&&d.dueDate===iso);
+    const creditDues=(state.creditAccounts||[]).filter(c=>c.balance>0&&c.dueAmount>0&&c.dueDate===iso);
+    const tx=state.transactions.filter(t=>t.date===iso);
+    const events=[...dues.map(d=>({label:d.name,cls:''})),...creditDues.map(c=>({label:`${c.name} credit`,cls:''})),...tx.slice(0,2).map(t=>({label:t.category,cls:'tx'}))];
+    const visible=events.slice(0,3), extra=Math.max(0,events.length-visible.length);
+    html.push(`<button class="calendar-day ${inMonth?'':'outside'} ${iso===todayISO()?'today':''} ${iso===selectedCalendarDate?'selected':''}" type="button" data-date="${iso}"><span class="calendar-number">${date.getDate()}</span><span class="calendar-events">${visible.map(e=>`<span class="calendar-event ${e.cls}">${escapeHtml(e.label)}</span>`).join('')}${extra?`<span class="calendar-more">+${extra} more</span>`:''}</span></button>`);
   }
-
-  grid.innerHTML = html.join('');
-  grid.querySelectorAll('.calendar-day').forEach(btn => {
-    btn.addEventListener('click', () => {
-      selectedCalendarDate = btn.dataset.date;
-      const selected = parseISO(selectedCalendarDate);
-      if (selected.getMonth() !== calendarCursor.getMonth() || selected.getFullYear() !== calendarCursor.getFullYear()) {
-        calendarCursor = startOfMonth(selected);
-      }
-      renderCalendar();
-    });
-  });
-
+  grid.innerHTML=html.join('');
+  grid.querySelectorAll('.calendar-day').forEach(btn=>btn.addEventListener('click',()=>{selectedCalendarDate=btn.dataset.date;const selected=parseISO(selectedCalendarDate);if(selected.getMonth()!==calendarCursor.getMonth()||selected.getFullYear()!==calendarCursor.getFullYear())calendarCursor=startOfMonth(selected);renderCalendar();}));
   renderSelectedDate();
 }
 
 function renderSelectedDate() {
-  text('selectedDateTitle', formatDate(selectedCalendarDate, {
-    weekday: 'long', month: 'long', day: 'numeric', year: 'numeric'
-  }));
-
-  const dues = state.debts.filter(d => d.balance > 0 && d.dueDate === selectedCalendarDate);
-  const tx = state.transactions.filter(t => t.date === selectedCalendarDate);
-  const el = document.getElementById('selectedDateItems');
-  if (!el) return;
-
-  const pieces = [];
-  dues.forEach(d => {
-    pieces.push(`
-      <div class="list-item">
-        <div class="item-left">
-          <div class="item-title">Due: ${escapeHtml(d.name)}</div>
-          <div class="item-sub">Balance ${peso(d.balance)} • Reminder ${d.reminderDays} day${d.reminderDays === 1 ? '' : 's'} before</div>
-        </div>
-        <div class="item-amount amount-out">${peso(Math.min(d.dueAmount, d.balance))}</div>
-      </div>`);
-  });
-
-  tx.forEach(t => pieces.push(transactionRow(t, false)));
-  el.innerHTML = pieces.length ? pieces.join('') : emptyHtml('No dues or transactions on this date.');
+  text('selectedDateTitle', formatDate(selectedCalendarDate,{weekday:'long',month:'long',day:'numeric',year:'numeric'}));
+  const dues=state.debts.filter(d=>d.balance>0&&d.dueDate===selectedCalendarDate);
+  const creditDues=(state.creditAccounts||[]).filter(c=>c.balance>0&&c.dueAmount>0&&c.dueDate===selectedCalendarDate);
+  const tx=state.transactions.filter(t=>t.date===selectedCalendarDate);
+  const el=document.getElementById('selectedDateItems'); if(!el)return;
+  const pieces=[];
+  dues.forEach(d=>pieces.push(`<div class="list-item"><div class="item-left"><div class="item-title">Debt due: ${escapeHtml(d.name)}</div><div class="item-sub">Balance ${peso(d.balance)}</div></div><div class="item-amount amount-out">${peso(Math.min(d.dueAmount,d.balance))}</div></div>`));
+  creditDues.forEach(c=>pieces.push(`<div class="list-item"><div class="item-left"><div class="item-title">Credit due: ${escapeHtml(c.name)}</div><div class="item-sub">${escapeHtml(c.provider)} • Outstanding ${peso(c.balance)}</div></div><div class="item-amount amount-out">${peso(Math.min(c.dueAmount,c.balance))}</div></div>`));
+  tx.forEach(t=>pieces.push(transactionRow(t,false)));
+  el.innerHTML=pieces.length?pieces.join(''):emptyHtml('No dues or transactions on this date.');
 }
-
-/* ---------------- Charts ---------------- */
-
 
 function chartTextColor() { return currentTheme() === 'dark' ? '#d8c9bc' : '#4b4037'; }
 function chartMutedColor() { return currentTheme() === 'dark' ? '#a99a8d' : '#8b7c70'; }
@@ -536,27 +774,15 @@ function chartGridColor() { return currentTheme() === 'dark' ? '#463b33' : '#c9b
 function chartBarColor() { return currentTheme() === 'dark' ? '#d1b49b' : '#4b382b'; }
 
 function renderCharts() {
-  const reportsPage = document.getElementById('reports');
-  if (!reportsPage || !reportsPage.classList.contains('active')) return;
-
-  const incomeGroups = aggregate(
-    state.transactions.filter(t => t.type === 'income'),
-    t => t.category,
-    t => t.amount
-  );
-  drawDonutChart('incomeChart', incomeGroups, 'incomeLegend');
-
-  const bills = sum(state.transactions.filter(t => t.type === 'expense' && t.category === 'Bills').map(t => t.amount));
-  const expenses = sum(state.transactions.filter(t => t.type === 'expense' && t.category !== 'Bills').map(t => t.amount));
-  const debt = sum(state.transactions.filter(t => t.type === 'debt-payment').map(t => t.amount));
-  drawAllocationPie('allocationChart', { Expenses: expenses, Bills: bills, Debt: debt });
-
-  const spending = aggregate(
-    state.transactions.filter(t => t.type === 'expense'),
-    t => t.category,
-    t => t.amount
-  );
-  drawBarChart('spendingChart', spending);
+  const reportsPage=document.getElementById('reports'); if(!reportsPage||!reportsPage.classList.contains('active'))return;
+  const incomeGroups=aggregate(state.transactions.filter(t=>t.type==='income'),t=>t.category,t=>t.amount);
+  drawDonutChart('incomeChart',incomeGroups,'incomeLegend');
+  const bills=sum(state.transactions.filter(t=>['expense','credit-purchase'].includes(t.type)&&t.category==='Bills').map(t=>t.amount));
+  const expenses=sum(state.transactions.filter(t=>['expense','credit-purchase'].includes(t.type)&&t.category!=='Bills').map(t=>t.amount));
+  const payments=sum(state.transactions.filter(t=>['debt-payment','credit-payment'].includes(t.type)).map(t=>t.amount));
+  drawAllocationPie('allocationChart',{Expenses:expenses,Bills:bills,Payments:payments});
+  const spending=aggregate(state.transactions.filter(t=>['expense','credit-purchase'].includes(t.type)),t=>t.category,t=>t.amount);
+  drawBarChart('spendingChart',spending);
 }
 
 function setupCanvas(canvas) {
@@ -791,13 +1017,14 @@ function openDB() {
 async function syncDebtsToIndexedDB() {
   if (!('indexedDB' in window)) return;
   const db = await openDB();
-  await new Promise((resolve, reject) => {
-    const tx = db.transaction(DEBT_STORE, 'readwrite');
-    const store = tx.objectStore(DEBT_STORE);
-    store.clear();
-    state.debts.forEach(debt => store.put(debt));
-    tx.oncomplete = resolve;
-    tx.onerror = () => reject(tx.error);
+  await new Promise((resolve,reject)=>{
+    const tx=db.transaction(DEBT_STORE,'readwrite'); const store=tx.objectStore(DEBT_STORE); store.clear();
+    state.debts.forEach(debt=>store.put(debt));
+    (state.creditAccounts||[]).filter(c=>c.balance>0&&c.dueAmount>0).forEach(c=>store.put({
+      id:`credit-${c.id}`, name:`${c.name} (${c.provider})`, balance:c.balance, dueAmount:c.dueAmount,
+      dueDate:c.dueDate, reminderDays:c.reminderDays
+    }));
+    tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error);
   });
   db.close();
 }
@@ -1088,19 +1315,10 @@ function csvCell(value) {
 }
 
 function buildUnifiedExportRows() {
-  const rows = [[
-    'Record Type','Date','Type / Status','Name / Category','Amount','Original Amount',
-    'Current Balance','Amount Due','Due Date','Reminder Days','Notes','Linked Debt ID'
-  ]];
-
-  state.transactions.forEach(t => rows.push([
-    'Transaction', t.date || '', t.type || '', t.category || '', Number(t.amount || 0), '', '', '', '', '', t.notes || '', t.debtId || ''
-  ]));
-
-  state.debts.forEach(d => rows.push([
-    'Debt', '', d.balance > 0 ? debtStatus(d).text : 'PAID', d.name || '', '', Number(d.original || 0),
-    Number(d.balance || 0), Number(d.dueAmount || 0), d.dueDate || '', Number(d.reminderDays || 0), '', d.id || ''
-  ]));
+  const rows=[['Record Type','Date','Type / Status','Name / Category','Amount','Original / Limit','Current Balance','Amount Due','Due Date','Reminder Days','Notes','Linked Debt/Credit ID']];
+  state.transactions.forEach(t=>rows.push(['Transaction',t.date||'',t.type||'',t.category||'',Number(t.amount||0),'','','','','',t.notes||'',t.creditId||t.debtId||'']));
+  state.debts.forEach(d=>rows.push(['Debt','',d.balance>0?debtStatus(d).text:'PAID',d.name||'','',Number(d.original||0),Number(d.balance||0),Number(d.dueAmount||0),d.dueDate||'',Number(d.reminderDays||0),'',d.id||'']));
+  (state.creditAccounts||[]).forEach(c=>rows.push(['Credit','',creditStatus(c).text,`${c.name} (${c.provider})`,'',Number(c.limit||0),Number(c.balance||0),Number(c.dueAmount||0),c.dueDate||'',Number(c.reminderDays||0),'',c.id||'']));
   return rows;
 }
 
@@ -1118,18 +1336,19 @@ function excelEscape(value) {
 
 function exportExcel() {
   setMenuOpen(false);
-  const totalIncome = sum(state.transactions.filter(t => t.type === 'income').map(t => t.amount));
-  const actualExpenses = sum(state.transactions.filter(t => t.type === 'expense').map(t => t.amount));
-  const debtPayments = sum(state.transactions.filter(t => t.type === 'debt-payment').map(t => t.amount));
-  const totalDebt = sum(state.debts.filter(d => d.balance > 0).map(d => d.balance));
-
-  const txRows = state.transactions.map(t => `<tr><td>${excelEscape(t.date)}</td><td>${excelEscape(t.type)}</td><td>${excelEscape(t.category)}</td><td class="num">${Number(t.amount || 0).toFixed(2)}</td><td>${excelEscape(t.notes)}</td><td>${excelEscape(t.debtId || '')}</td></tr>`).join('');
-  const debtRows = state.debts.map(d => `<tr><td>${excelEscape(d.name)}</td><td class="num">${Number(d.original || 0).toFixed(2)}</td><td class="num">${Number(d.balance || 0).toFixed(2)}</td><td class="num">${Number(d.dueAmount || 0).toFixed(2)}</td><td>${excelEscape(d.dueDate)}</td><td>${excelEscape(d.reminderDays)}</td><td>${excelEscape(debtStatus(d).text)}</td></tr>`).join('');
-
-  const html = `<!doctype html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif}table{border-collapse:collapse;margin:0 0 22px}th,td{border:1px solid #bbb;padding:6px 9px}th{background:#eee}.num{text-align:right}h2{margin-top:24px}</style></head><body><h1>Pera Tracker Export</h1><p>Exported: ${excelEscape(new Date().toLocaleString('en-PH'))}</p><h2>Summary</h2><table><tr><th>Total Income</th><th>Actual Expenses</th><th>Debt Payments</th><th>Outstanding Debt</th></tr><tr><td class="num">${totalIncome.toFixed(2)}</td><td class="num">${actualExpenses.toFixed(2)}</td><td class="num">${debtPayments.toFixed(2)}</td><td class="num">${totalDebt.toFixed(2)}</td></tr></table><h2>Transactions</h2><table><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Notes</th><th>Linked Debt ID</th></tr>${txRows || '<tr><td colspan="6">No transactions</td></tr>'}</table><h2>Debts</h2><table><tr><th>Name</th><th>Original Amount</th><th>Current Balance</th><th>Amount Due</th><th>Due Date</th><th>Reminder Days</th><th>Status</th></tr>${debtRows || '<tr><td colspan="7">No debts</td></tr>'}</table></body></html>`;
-  downloadBlob(new Blob(['\ufeff', html], { type: 'application/vnd.ms-excel;charset=utf-8' }), `pera_tracker_${todayISO()}.xls`);
+  const totalIncome=sum(state.transactions.filter(t=>t.type==='income').map(t=>t.amount));
+  const actualExpenses=sum(state.transactions.filter(t=>['expense','credit-purchase'].includes(t.type)).map(t=>t.amount));
+  const payments=sum(state.transactions.filter(t=>['debt-payment','credit-payment'].includes(t.type)).map(t=>t.amount));
+  const totalDebt=sum(state.debts.filter(d=>d.balance>0).map(d=>d.balance))+sum((state.creditAccounts||[]).filter(c=>c.balance>0).map(c=>c.balance));
+  const txRows=state.transactions.map(t=>`<tr><td>${excelEscape(t.date)}</td><td>${excelEscape(t.type)}</td><td>${excelEscape(t.category)}</td><td class="num">${Number(t.amount||0).toFixed(2)}</td><td>${excelEscape(t.notes)}</td><td>${excelEscape(t.creditId||t.debtId||'')}</td></tr>`).join('');
+  const debtRows=state.debts.map(d=>`<tr><td>${excelEscape(d.name)}</td><td class="num">${Number(d.original||0).toFixed(2)}</td><td class="num">${Number(d.balance||0).toFixed(2)}</td><td class="num">${Number(d.dueAmount||0).toFixed(2)}</td><td>${excelEscape(d.dueDate)}</td><td>${excelEscape(debtStatus(d).text)}</td></tr>`).join('');
+  const creditRows=(state.creditAccounts||[]).map(c=>`<tr><td>${excelEscape(c.provider)}</td><td>${excelEscape(c.name)}</td><td class="num">${Number(c.limit||0).toFixed(2)}</td><td class="num">${Number(c.balance||0).toFixed(2)}</td><td class="num">${Number(c.dueAmount||0).toFixed(2)}</td><td>${excelEscape(c.dueDate)}</td><td>${excelEscape(creditStatus(c).text)}</td></tr>`).join('');
+  const html=`<!doctype html><html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel" xmlns="http://www.w3.org/TR/REC-html40"><head><meta charset="utf-8"><style>body{font-family:Arial,sans-serif}table{border-collapse:collapse;margin:0 0 22px}th,td{border:1px solid #bbb;padding:6px 9px}th{background:#eee}.num{text-align:right}h2{margin-top:24px}</style></head><body><h1>Pera Tracker Export</h1><p>Exported: ${excelEscape(new Date().toLocaleString('en-PH'))}</p><h2>Summary</h2><table><tr><th>Total Income</th><th>Actual Expenses</th><th>Debt/Credit Payments</th><th>Total Outstanding</th></tr><tr><td class="num">${totalIncome.toFixed(2)}</td><td class="num">${actualExpenses.toFixed(2)}</td><td class="num">${payments.toFixed(2)}</td><td class="num">${totalDebt.toFixed(2)}</td></tr></table><h2>Transactions</h2><table><tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Notes</th><th>Linked ID</th></tr>${txRows||'<tr><td colspan="6">No transactions</td></tr>'}</table><h2>Debts</h2><table><tr><th>Name</th><th>Original</th><th>Balance</th><th>Amount Due</th><th>Due Date</th><th>Status</th></tr>${debtRows||'<tr><td colspan="6">No debts</td></tr>'}</table><h2>Credit Accounts</h2><table><tr><th>Provider</th><th>Name</th><th>Limit</th><th>Outstanding</th><th>Amount Due</th><th>Due Date</th><th>Status</th></tr>${creditRows||'<tr><td colspan="7">No credit accounts</td></tr>'}</table></body></html>`;
+  downloadBlob(new Blob(['\ufeff',html],{type:'application/vnd.ms-excel;charset=utf-8'}),`pera_tracker_${todayISO()}.xls`);
   showToast('Excel export downloaded.');
 }
+
+/* ---------------- V4 Photo -> Text OCR ---------------- */
 
 /* ---------------- V4 Photo -> Text OCR ---------------- */
 
@@ -1762,41 +1981,67 @@ function detectPhotoDateV6(lines) {
   return '';
 }
 
+function detectPhotoDescription(lines, kind, merchant = '') {
+  const normalized=lines.map(v=>String(v||'').trim()).filter(Boolean);
+  const labeled=/^(?:description|details|purpose|remarks?|note|message|item|purchase)\s*[:\-]?\s*(.*)$/i;
+  for(let i=0;i<normalized.length;i++){
+    const m=normalized[i].match(labeled);
+    if(m){ const value=(m[1]||normalized[i+1]||'').trim(); if(value && value.length>2 && value.length<140) return value; }
+  }
+  if(kind==='receipt'){
+    const ignore=/(subtotal|total|cash|change|vat|sales|discount|amount|due|invoice|receipt|cashier|date|time|tin|qty|item\(s\)|senior|reference|ref\b)/i;
+    const items=[];
+    for(const line of normalized){
+      if(ignore.test(line)) continue;
+      const amounts=findReceiptAmounts(line);
+      if(!amounts.length) continue;
+      let name=normalizeReceiptAmountText(line).replace(/(?:\bP\s*)?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}\b.*$/i,'').replace(/^\s*\d+\s+/,'').trim();
+      if(name && name.length>=2 && !/^[-\d\s.,]+$/.test(name) && name.toLowerCase()!==String(merchant).toLowerCase()) items.push(name);
+      if(items.length>=4) break;
+    }
+    if(items.length) return items.join(', ');
+  }
+  if(kind==='transaction'){
+    const labelsToSkip=/(transaction|successful|completed|reference|ref\b|amount|date|time|balance|fee|account|mobile|gcash|maya|unionbank|metrobank|bpi|bdo)/i;
+    const candidates=normalized.filter(v=>v.length>=3&&v.length<=100&&!labelsToSkip.test(v)&&!findFlexibleMoneyAmounts(v,true).length);
+    const merchantLow=String(merchant||'').toLowerCase();
+    const useful=candidates.find(v=>v.toLowerCase()!==merchantLow);
+    if(useful) return useful;
+    if(merchant) return `Transaction with ${merchant}`;
+  }
+  return merchant ? `Purchase from ${merchant}` : 'Scanned transaction';
+}
+
 function parsePhotoDocument(textValue) {
-  const textValueSafe = String(textValue || '');
-  const lines = textValueSafe.split('\n').map(v => v.trim()).filter(Boolean);
-  if (!lines.length) return { kind:'document', isReceipt:false, isFinancial:false, merchant:'', date:'', total:0, reference:'', category:'Other' };
-
-  const receiptSignals = /(subtotal|total\s*due|cashier|vatable|vat[- ]?exempt|cash\b|change\b|qty\b|item\(s\)|sales\s*invoice|official\s*receipt)/i.test(textValueSafe);
-  const transactionSignals = /(transaction\s*(successful|complete|details|id|no)|payment\s*(successful|complete|details)|amount\s*(sent|paid|received)|paid\s*to|sent\s*to|recipient|transfer\s*(successful|complete)|reference\s*(no|number|#)|gcash|maya|paymaya|bank\s*transfer)/i.test(textValueSafe);
-
-  let kind = transactionSignals && !receiptSignals ? 'transaction' : receiptSignals ? 'receipt' : 'document';
-  const receiptTotal = detectPhotoTotal(lines);
-  const transactionAmount = detectTransactionAmount(lines);
-  let total = kind === 'transaction' ? (transactionAmount || receiptTotal) : (receiptTotal || transactionAmount);
-  const date = detectPhotoDateV6(lines);
-  const merchant = kind === 'transaction' ? detectTransactionParty(lines, textValueSafe) : detectPhotoMerchant(lines, textValueSafe);
-  const reference = detectTransactionReference(lines);
-  const category = guessPhotoCategory(textValueSafe);
-  const isFinancial = Boolean(total || receiptSignals || transactionSignals);
-  if (kind === 'document' && transactionSignals) kind = 'transaction';
-  return { kind, isReceipt: kind === 'receipt', isFinancial, merchant, date, total, reference, category };
+  const textValueSafe=String(textValue||'');
+  const lines=textValueSafe.split('\n').map(v=>v.trim()).filter(Boolean);
+  if(!lines.length)return {kind:'document',isReceipt:false,isFinancial:false,merchant:'',date:'',total:0,reference:'',category:'Other',description:''};
+  const receiptSignals=/(subtotal|total\s*due|cashier|vatable|vat[- ]?exempt|cash\b|change\b|qty\b|item\(s\)|sales\s*invoice|official\s*receipt)/i.test(textValueSafe);
+  const transactionSignals=/(transaction\s*(successful|complete|details|id|no)|payment\s*(successful|complete|details)|amount\s*(sent|paid|received)|paid\s*to|sent\s*to|recipient|transfer\s*(successful|complete)|reference\s*(no|number|#)|gcash|maya|paymaya|bank\s*transfer|card\s*ending|purchase\s*successful)/i.test(textValueSafe);
+  let kind=transactionSignals&&!receiptSignals?'transaction':receiptSignals?'receipt':'document';
+  const receiptTotal=detectPhotoTotal(lines), transactionAmount=detectTransactionAmount(lines);
+  const total=kind==='transaction'?(transactionAmount||receiptTotal):(receiptTotal||transactionAmount);
+  const date=detectPhotoDateV6(lines);
+  const merchant=kind==='transaction'?detectTransactionParty(lines,textValueSafe):detectPhotoMerchant(lines,textValueSafe);
+  const reference=detectTransactionReference(lines);
+  const category=guessPhotoCategory(textValueSafe);
+  const description=detectPhotoDescription(lines,kind,merchant);
+  const isFinancial=Boolean(total||receiptSignals||transactionSignals);
+  if(kind==='document'&&transactionSignals)kind='transaction';
+  return {kind,isReceipt:kind==='receipt',isFinancial,merchant,date,total,reference,category,description};
 }
 
 function renderPhotoSummary(parsed) {
-  const summary = document.getElementById('receiptSummary');
-  if (!summary) return;
-  if (!parsed || !parsed.isFinancial) {
-    summary.hidden = true;
-    return;
-  }
-  summary.hidden = false;
-  text('photoSummaryTitle', parsed.kind === 'transaction' ? 'Transaction screenshot detected' : parsed.kind === 'receipt' ? 'Receipt details detected' : 'Possible expense detected');
-  text('photoMerchant', parsed.merchant || 'Not detected');
-  text('photoDate', parsed.date ? formatDate(parsed.date) : 'Not detected');
-  text('photoTotal', parsed.total ? peso(parsed.total) : 'Not detected');
-  text('photoReference', parsed.reference || 'Not detected');
-  text('photoCategory', parsed.category || 'Other');
+  const summary=document.getElementById('receiptSummary'); if(!summary)return;
+  if(!parsed||!parsed.isFinancial){summary.hidden=true;return;}
+  summary.hidden=false;
+  text('photoSummaryTitle',parsed.kind==='transaction'?'Transaction screenshot detected':parsed.kind==='receipt'?'Receipt details detected':'Possible expense detected');
+  text('photoMerchant',parsed.merchant||'Not detected');
+  text('photoDate',parsed.date?formatDate(parsed.date):'Not detected');
+  text('photoTotal',parsed.total?peso(parsed.total):'Not detected');
+  text('photoReference',parsed.reference||'Not detected');
+  text('photoCategory',parsed.category||'Other');
+  text('photoDescription',parsed.description||'Not detected');
 }
 
 function titleCaseWords(value) {
@@ -2014,27 +2259,29 @@ async function copyPhotoText() {
 }
 
 function usePhotoAsExpense() {
-  if (!photoScanData || !photoScanData.total) {
-    showToast('No receipt total was detected.');
-    return;
-  }
+  if(!photoScanData||!photoScanData.total){showToast('No total amount was detected. You can edit the scanned text and try a clearer image.');return;}
   showPage('tracker');
-  document.getElementById('txType').value = 'expense';
-  updateTransactionCategories();
-  document.getElementById('txAmount').value = photoScanData.total;
-  document.getElementById('txCategory').value = EXPENSE_CATEGORIES.includes(photoScanData.category) ? photoScanData.category : 'Other';
-  document.getElementById('txDate').value = photoScanData.date || todayISO();
-  document.getElementById('txNotes').value = [photoScanData.merchant, photoScanData.reference ? `Ref ${photoScanData.reference}` : '', 'Imported from Photo → Text'].filter(Boolean).join(' — ');
-  showToast('Detected receipt details copied to Daily Tracker. Review before saving.', 3400);
+  document.getElementById('txType').value='expense'; updateTransactionCategories();
+  document.getElementById('txAmount').value=photoScanData.total;
+  document.getElementById('txCategory').value=EXPENSE_CATEGORIES.includes(photoScanData.category)?photoScanData.category:'Other';
+  document.getElementById('txDate').value=photoScanData.date||todayISO();
+  document.getElementById('txNotes').value=[photoScanData.merchant,photoScanData.description,photoScanData.reference?`Ref ${photoScanData.reference}`:''].filter(Boolean).join(' — ');
+  showToast('Merchant, amount, date and description copied to Daily Expense. Review then Save Transaction.',4200);
 }
+
+/* ---------------- Events ---------------- */
 
 /* ---------------- Events ---------------- */
 
 document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('txDate').value = todayISO();
+  document.getElementById('creditActivityDate').value = todayISO();
   updateTransactionCategories();
+  updateCreditActivityForm();
 
   document.getElementById('txType').addEventListener('change', updateTransactionCategories);
+  document.getElementById('creditActivityType').addEventListener('change', updateCreditActivityForm);
+  document.getElementById('saveCreditActivityBtn').addEventListener('click', saveCreditActivity);
 
   document.getElementById('calendarPrevBtn').addEventListener('click', () => {
     calendarCursor = new Date(calendarCursor.getFullYear(), calendarCursor.getMonth() - 1, 1);

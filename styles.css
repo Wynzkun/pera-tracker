@@ -234,6 +234,7 @@ button { -webkit-tap-highlight-color: transparent; }
   font-weight: 800;
   letter-spacing: .08em;
 }
+.status-minpaid { color: #2f6945; background: #e1f0e5; }
 .status-paid { color: #2f6945; background: #e1f0e5; }
 .status-soon { color: #82561c; background: #f6e8ca; }
 .status-today { color: #874619; background: #f8ddc4; }
@@ -311,6 +312,25 @@ textarea { min-height: 84px; resize: vertical; }
   background: #eee7de;
 }
 .debt-progress > div { height: 100%; background: var(--green); }
+.debt-progress-meta,
+.debt-due-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 10px;
+}
+.debt-progress-meta strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+.debt-due-summary {
+  padding-top: 9px;
+  border-top: 1px dashed var(--line);
+}
+
 
 .notification-panel {
   display: flex;
@@ -472,7 +492,7 @@ textarea { min-height: 84px; resize: vertical; }
   left: 50%;
   z-index: 30;
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   width: min(1180px, 100%);
   transform: translateX(-50%);
   padding-bottom: env(safe-area-inset-bottom);
@@ -913,4 +933,38 @@ html[data-theme="dark"] .status-paid { color: #9bd2ab; background: #1e3827; }
 
 @media (max-width: 720px) {
   .receipt-summary-grid { grid-template-columns: 1fr 1fr; }
+}
+
+
+/* ===== V7 Credit + scanner details ===== */
+.photo-description-field { grid-column: 1 / -1; }
+.photo-description-field strong { white-space: normal !important; line-height: 1.45; }
+.credit-layout { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.credit-list { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 12px; }
+.credit-account-card { padding: 15px; border: 1px solid var(--line); border-radius: 15px; background: var(--surface); box-shadow: var(--shadow); }
+.credit-account-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.credit-provider { display: inline-flex; margin-bottom: 6px; padding: 4px 7px; border-radius: 999px; background: var(--surface-2); color: var(--muted); font-size: 9px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; }
+.credit-account-name { font-weight: 800; font-size: 14px; }
+.credit-account-balance { font-size: 18px; font-weight: 800; text-align: right; }
+.credit-account-balance small { display: block; margin-top: 2px; color: var(--muted); font-size: 9px; font-weight: 600; }
+.credit-metrics { display: grid; grid-template-columns: repeat(3,1fr); gap: 7px; margin-top: 12px; }
+.credit-metric { min-width: 0; padding: 9px; border: 1px solid #e5dbce; border-radius: 9px; background: #fffaf3; }
+.credit-metric span { display: block; color: var(--muted); font-size: 8px; font-weight: 750; text-transform: uppercase; }
+.credit-metric strong { display: block; margin-top: 4px; font-size: 11px; overflow-wrap: anywhere; }
+.credit-usage { height: 7px; margin-top: 11px; overflow: hidden; border-radius: 999px; background: #eee5d9; }
+.credit-usage > div { height: 100%; background: var(--green); }
+.credit-usage.over > div { background: var(--danger); }
+.credit-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 11px; }
+.credit-actions .mini-btn { flex: 1 1 auto; }
+.credit-empty { grid-column: 1 / -1; }
+html[data-theme="dark"] .credit-account-card { background: #211b17; border-color: #493b31; }
+html[data-theme="dark"] .credit-provider { background: #2d251f; }
+html[data-theme="dark"] .credit-metric { background: #191512; border-color: #40352d; }
+html[data-theme="dark"] .credit-usage { background: #352c26; }
+@media (max-width: 900px) { .credit-layout { grid-template-columns: 1fr; } }
+@media (max-width: 650px) {
+  .credit-list { grid-template-columns: 1fr; }
+  .credit-summary-grid { grid-template-columns: 1fr 1fr; }
+  .bottom-nav { overflow-x: auto; grid-template-columns: repeat(6, minmax(54px,1fr)); }
+  .nav-btn { min-width: 54px; padding-left: 1px; padding-right: 1px; }
 }

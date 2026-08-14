@@ -1,4 +1,6 @@
 {
-  "version": "6.0",
-  "name": "Pera Tracker V6"
+  "version": "8.0",
+  "name": "Pera Tracker V8",
+  "build": "2026-08-15",
+  "notes": "Fixed debt payment progress and added current-cycle minimum due payment status."
 }

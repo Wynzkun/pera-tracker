@@ -1,7 +1,7 @@
 
 'use strict';
 
-const CACHE_NAME = 'pera-tracker-v6.0';
+const CACHE_NAME = 'pera-tracker-v8.0';
 const DB_NAME = 'peraTrackerDB';
 const DB_VERSION = 1;
 const DEBT_STORE = 'debts';
@@ -163,6 +163,11 @@ async function checkDueReminders() {
     for (const debt of debts) {
       if (!debt || Number(debt.balance) <= 0 || !debt.dueDate) continue;
 
+      const minimumDue = Math.max(0, Number(debt.dueAmount || 0));
+      const paidTowardDue = debt.dueCycleKey === debt.dueDate ? Math.max(0, Number(debt.duePaidAmount || 0)) : 0;
+      const minimumPaid = minimumDue > 0 && paidTowardDue + 0.005 >= minimumDue;
+      if (minimumPaid) continue;
+
       const days = diffDays(debt.dueDate, today);
       const reminderDays = Number(debt.reminderDays || 0);
       let kind = null;
@@ -172,11 +177,11 @@ async function checkDueReminders() {
       if (days === 0) {
         kind = 'due';
         title = `${debt.name} is due today`;
-        body = `Amount due: ${money(Math.min(Number(debt.dueAmount || 0), Number(debt.balance || 0)))}.`;
+        body = `Amount due: ${money(Math.max(0, Math.min(Number(debt.balance || 0), minimumDue - paidTowardDue)))}.`;
       } else if (days > 0 && days === reminderDays && reminderDays > 0) {
         kind = 'reminder';
         title = `${debt.name} due in ${days} day${days === 1 ? '' : 's'}`;
-        body = `Amount due: ${money(Math.min(Number(debt.dueAmount || 0), Number(debt.balance || 0)))} on ${debt.dueDate}.`;
+        body = `Amount due: ${money(Math.max(0, Math.min(Number(debt.balance || 0), minimumDue - paidTowardDue)))} on ${debt.dueDate}.`;
       } else if (days === -1) {
         kind = 'overdue';
         title = `${debt.name} is overdue`;
