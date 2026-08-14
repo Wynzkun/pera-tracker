@@ -7,6 +7,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="apple-mobile-web-app-title" content="Pera Tracker" />
+  <script>try{if(localStorage.getItem('peraTrackerTheme')==='dark')document.documentElement.dataset.theme='dark';}catch(e){}</script>
   <link rel="manifest" href="./manifest.webmanifest" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="stylesheet" href="./styles.css" />
@@ -16,9 +17,10 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="topbar-left">
-        <button class="menu-trigger" id="menuTrigger" type="button" aria-label="Open menu" aria-expanded="false">
-          <span class="menu-glyph">☰</span>
-          <span class="menu-word">Menu</span>
+        <button class="menu-trigger" id="menuTrigger" type="button" aria-label="Open menu" aria-expanded="false" title="Menu">
+          <svg class="menu-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M4 7h16M4 12h16M4 17h16"></path>
+          </svg>
           <i id="menuUpdateDot" class="menu-update-dot" hidden></i>
         </button>
         <div>
@@ -27,7 +29,6 @@
           <p class="subtitle">Utang, expenses, income at due dates — isang lugar lang.</p>
         </div>
       </div>
-      <button class="icon-btn" id="installTopBtn" type="button" title="Install app" hidden>Install</button>
 
       <div class="app-menu" id="appMenu" hidden>
         <div class="app-menu-head">
@@ -35,11 +36,28 @@
             <strong>Pera Tracker</strong>
             <small>App controls</small>
           </div>
-          <span class="version-pill">v5</span>
+          <span class="version-pill">v6</span>
         </div>
         <button class="app-menu-item" id="menuPhotoBtn" type="button">
           <span class="menu-item-icon">▣</span>
-          <span><strong>Photo → Text</strong><small>Enhanced receipt / photo OCR</small></span>
+          <span><strong>Photo → Text</strong><small>Receipts, notes & transaction screenshots</small></span>
+        </button>
+        <button class="app-menu-item" id="menuInstallBtn" type="button">
+          <span class="menu-item-icon">⇩</span>
+          <span><strong>Install App</strong><small id="menuInstallStatus">Install Pera Tracker on this device</small></span>
+        </button>
+        <button class="app-menu-item" id="menuThemeBtn" type="button">
+          <span class="menu-item-icon" id="menuThemeIcon">◐</span>
+          <span><strong>Dark Mode</strong><small id="menuThemeStatus">Currently off</small></span>
+        </button>
+        <div class="app-menu-divider"></div>
+        <button class="app-menu-item" id="menuExportCsvBtn" type="button">
+          <span class="menu-item-icon">CSV</span>
+          <span><strong>Export CSV</strong><small>Transactions and debts in one CSV file</small></span>
+        </button>
+        <button class="app-menu-item" id="menuExportExcelBtn" type="button">
+          <span class="menu-item-icon">XLS</span>
+          <span><strong>Export Excel</strong><small>Summary, transactions and debts for Excel</small></span>
         </button>
         <div class="app-menu-divider"></div>
         <button class="app-menu-item" id="menuRefreshBtn" type="button">
@@ -287,7 +305,7 @@
             <div>
               <div class="eyebrow">CAPTURE</div>
               <h3>Take a photo or choose an image</h3>
-              <p>Enhanced for thermal and dot-matrix receipts, shadows, wrinkles, and low-resolution photos. The app automatically upscales and scans the image twice before placing the clearest text into the editable notepad.<br><strong>Best result:</strong> fill most of the camera frame with the receipt, keep it as flat as possible, and avoid glare.</p>
+              <p>Enhanced for <strong>receipts and transaction screenshots</strong>. It now uses separate screenshot and receipt image treatments, dark-screen inversion when needed, and three OCR passes before combining the clearest financial details.<br><strong>Best result:</strong> for receipts, fill the frame and avoid glare; for screenshots, upload the original screenshot instead of a compressed chat copy.</p>
             </div>
             <div class="photo-actions">
               <button class="btn btn-dark" id="photoCameraBtn" type="button">📷 Take Photo</button>
@@ -329,15 +347,16 @@
               <div id="receiptSummary" class="receipt-summary" hidden>
                 <div class="receipt-summary-head">
                   <div>
-                    <div class="eyebrow">RECEIPT DETAILS</div>
-                    <h3>Possible expense detected</h3>
+                    <div class="eyebrow">DETECTED DETAILS</div>
+                    <h3 id="photoSummaryTitle">Possible financial transaction</h3>
                   </div>
                   <button class="btn btn-dark" id="sendPhotoToExpenseBtn" type="button">Use as Expense</button>
                 </div>
                 <div class="receipt-summary-grid">
-                  <div><span>Merchant</span><strong id="photoMerchant">—</strong></div>
+                  <div><span>Source / Merchant</span><strong id="photoMerchant">—</strong></div>
                   <div><span>Date</span><strong id="photoDate">—</strong></div>
-                  <div><span>Total</span><strong id="photoTotal">—</strong></div>
+                  <div><span>Amount</span><strong id="photoTotal">—</strong></div>
+                  <div><span>Reference</span><strong id="photoReference">—</strong></div>
                   <div><span>Category</span><strong id="photoCategory">—</strong></div>
                 </div>
               </div>

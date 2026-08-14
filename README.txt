@@ -1,22 +1,26 @@
-PERA TRACKER V5
+PERA TRACKER V6
 
-OCR IMPROVEMENTS
-- Enhanced two-pass receipt OCR for thermal and dot-matrix receipts.
-- Small photos are automatically upscaled before recognition.
-- Auto-level grayscale and gentle sharpening improve faded print.
-- Adaptive local thresholding helps with shadows, creases, glare and uneven paper.
-- OCR uses both single-block and sparse-text passes and chooses the stronger result.
-- Receipt parsing now handles OCR-spaced amounts such as P501. 00 and prioritizes TOTAL DUE / AMOUNT DUE over CASH / CHANGE.
-- Added common receipt clues for merchant/category recovery when the receipt header is cropped or faint.
+NEW IN V6
+- Fixed distorted top-left menu using a real SVG hamburger icon
+- Install App moved inside the menu
+- Dark Mode toggle inside the menu; preference is saved on the device
+- Export CSV and Excel (.xls) from the menu
+- OCR upgraded to 3 passes: screenshot/UI text, enhanced receipt text, and sparse/faint text
+- Dark transaction screenshots are automatically inverted for OCR
+- Transaction screenshots can detect amount, date, source/payee, reference number and category when readable
+- Receipt scanning from V5 remains available
 
-UPDATE EXISTING GITHUB PAGES APP
+UPDATE GITHUB
 1. Extract this ZIP.
-2. Upload/replace all files in the existing pera-tracker repository root.
+2. Upload/replace ALL files in the existing pera-tracker repository root.
 3. Commit to main.
 4. Wait for GitHub Pages deployment.
-5. Open the site in Chrome with ?v=5 once, or use Menu > Refresh / Update App.
+5. Open https://wynzkun.github.io/pera-tracker/?v=6 once in Chrome.
+6. Open Menu -> Refresh / Update App if the installed PWA still shows an older version.
 
-NOTES
-- OCR still cannot recover text physically hidden by a finger, cut off from the photo, or completely blown out by glare.
-- Very blurry photos can still require a retake, but V5 should materially improve the sample receipt types that V4 struggled with.
-- Existing financial data remains in the same localStorage database key.
+EXPORT
+- CSV: unified transactions + debts dataset.
+- Excel: one .xls workbook-style file containing Summary, Transactions and Debts sections.
+
+OCR NOTE
+For transaction screenshots, upload the original screenshot when possible. Images compressed by Messenger/Viber/social apps may lose small text before OCR receives them.

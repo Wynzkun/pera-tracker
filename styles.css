@@ -564,7 +564,6 @@ textarea { min-height: 84px; resize: vertical; }
   background: var(--surface-2);
   cursor: pointer;
 }
-.menu-trigger span { display: block; height: 2px; border-radius: 99px; background: var(--dark); }
 .menu-update-dot {
   position: absolute;
   top: -3px;
@@ -717,8 +716,6 @@ textarea { min-height: 84px; resize: vertical; }
   border: 1px solid #bfae9e;
   background: #f3e8da;
 }
-.menu-trigger .menu-glyph { display: block; font-size: 23px; line-height: 1; font-weight: 700; }
-.menu-trigger .menu-word { display: block; font-size: 10px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
 .app-menu-divider { height: 7px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); background: #f5eee4; }
 .hero-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .tracker-note {
@@ -794,7 +791,6 @@ textarea { min-height: 84px; resize: vertical; }
 .receipt-summary-grid strong { display: block; margin-top: 4px; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 720px) {
-  .menu-trigger .menu-word { display: none; }
   .menu-trigger { width: 44px !important; min-width: 44px; padding: 0 !important; }
   .photo-capture-head { flex-direction: column; }
   .photo-actions { width: 100%; }
@@ -802,5 +798,119 @@ textarea { min-height: 84px; resize: vertical; }
   .photo-workspace { grid-template-columns: 1fr; }
   .photo-preview-frame { min-height: 240px; }
   .photo-notepad { min-height: 350px; }
+  .receipt-summary-grid { grid-template-columns: 1fr 1fr; }
+}
+
+
+/* ===== V6 menu icon, export controls & dark mode ===== */
+.menu-trigger {
+  width: 44px !important;
+  min-width: 44px !important;
+  height: 44px !important;
+  padding: 0 !important;
+  border-radius: 12px;
+}
+.menu-trigger .menu-icon {
+  display: block;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.app-menu {
+  max-height: min(76vh, 650px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.menu-item-icon {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -.03em;
+}
+.receipt-summary-grid { grid-template-columns: repeat(5,1fr); }
+
+/* Dark mode uses the same visual hierarchy without turning the app into pure black. */
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f0d0c;
+  --surface: #181512;
+  --surface-2: #221d19;
+  --ink: #f3e9df;
+  --muted: #b4a69a;
+  --line: #3d342d;
+  --dark: #d8bda5;
+  --dark-2: #c9a88d;
+  --green: #7da88a;
+  --sand: #8e7b68;
+  --cream: #4a3d32;
+  --danger: #e4877e;
+  --warning: #d5a054;
+  --success: #7cc092;
+  --shadow: 0 12px 38px rgba(0,0,0,.28);
+}
+html[data-theme="dark"] body,
+html[data-theme="dark"] .app-shell { background: var(--surface); }
+html[data-theme="dark"] .topbar { background: rgba(24,21,18,.94); }
+html[data-theme="dark"] .summary-card,
+html[data-theme="dark"] .panel,
+html[data-theme="dark"] .list-item,
+html[data-theme="dark"] input,
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] .calendar-day { background: #1b1714; color: var(--ink); }
+html[data-theme="dark"] .primary-card {
+  color: #fff6ee;
+  border-color: #5a4637;
+  background: linear-gradient(140deg,#4a3528,#2b211b);
+}
+html[data-theme="dark"] .primary-card .summary-label,
+html[data-theme="dark"] .primary-card .summary-foot { color: #d9c7b8; }
+html[data-theme="dark"] .btn-dark { color: #1c1511; background: #d8bda5; }
+html[data-theme="dark"] .btn-dark:hover { background: #e3cdb9; }
+html[data-theme="dark"] .btn-light,
+html[data-theme="dark"] .mini-btn { color: var(--ink); background: #241f1b; border-color: var(--line); }
+html[data-theme="dark"] .menu-trigger { color: #ead8c7; border-color: #514238; background: #2a221d; }
+html[data-theme="dark"] .app-menu { background: #1b1714; border-color: #463b33; box-shadow: 0 20px 60px rgba(0,0,0,.55); }
+html[data-theme="dark"] .app-menu-item { border-bottom-color: #332b25; }
+html[data-theme="dark"] .app-menu-item:hover { background: #27211d; }
+html[data-theme="dark"] .menu-item-icon { color: #e1c7ae; background: #302720; }
+html[data-theme="dark"] .app-menu-divider { border-color: #3d342d; background: #120f0d; }
+html[data-theme="dark"] .version-pill { color: #ead8c7; background: #2d2520; }
+html[data-theme="dark"] .tracker-note { color: #c9b9aa; border-color: #44382f; background: #201a16; }
+html[data-theme="dark"] .photo-preview-frame { background: #100e0d; }
+html[data-theme="dark"] .ocr-status-card { background: #1e1915; }
+html[data-theme="dark"] .photo-notepad {
+  color: #e9dfd5;
+  border-color: #55483d;
+  background-color: #171411;
+  background-image:
+    linear-gradient(90deg, transparent 0 31px, rgba(193,105,88,.24) 31px 33px, transparent 33px),
+    repeating-linear-gradient(0deg, transparent 0 27px, rgba(217,194,172,.11) 27px 28px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+}
+html[data-theme="dark"] .receipt-summary { background: #211b17; border-color: #493b31; }
+html[data-theme="dark"] .receipt-summary-grid > div { background: #191512; border-color: #40352d; }
+html[data-theme="dark"] .calendar-day.outside { color: #756a61; background: #13110f; }
+html[data-theme="dark"] .calendar-day.today { background: #2d241e; }
+html[data-theme="dark"] .calendar-day.today .calendar-number { color: #1c1511; background: #d8bda5; }
+html[data-theme="dark"] .calendar-event { color: #17110e; background: #d8bda5; }
+html[data-theme="dark"] .calendar-event.tx { color: #d8cabd; background: #3a3029; }
+html[data-theme="dark"] .chart-panel { color: var(--ink); border-color: #514338; background: #1a1613; }
+html[data-theme="dark"] .chart-title { color: #e4d2c1; }
+html[data-theme="dark"] .bottom-nav { background: rgba(24,21,18,.97); }
+html[data-theme="dark"] .nav-btn { color: #a7998d; }
+html[data-theme="dark"] .nav-btn.active { color: #ead8c7; background: #2a221d; }
+html[data-theme="dark"] .empty { color: #8e8176; }
+html[data-theme="dark"] .status-future { color: #cfc0b3; background: #302923; }
+html[data-theme="dark"] .status-soon { color: #efc885; background: #3c2d19; }
+html[data-theme="dark"] .status-today { color: #f0af7b; background: #402619; }
+html[data-theme="dark"] .status-overdue { color: #f3a29b; background: #402321; }
+html[data-theme="dark"] .status-paid { color: #9bd2ab; background: #1e3827; }
+
+@media (max-width: 720px) {
   .receipt-summary-grid { grid-template-columns: 1fr 1fr; }
 }
